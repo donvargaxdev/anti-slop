@@ -60,6 +60,17 @@ func TestClosureDoesNotReadClockInCondition(t *testing.T) {
 
 func condition(func() time.Time) bool { return false }
 
+func TestClockSnapshotAndUnrelatedRefresh(t *testing.T) {
+	end := time.Now()
+	for now := time.Now(); now.Before(end); now = now.Add(time.Second) {
+		t.Log(now)
+	}
+	var sampled time.Time
+	for i := 0; i < 3; i, sampled = i+1, time.Now() {
+		t.Log(sampled)
+	}
+}
+
 func TestDeadlineReassignedToReady(t *testing.T) {
 	ready := make(chan time.Time)
 	close(ready)

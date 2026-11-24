@@ -76,6 +76,15 @@ func TestRetryAssignedCheck(t *test.T) {
 	t.Fatal(err)
 }
 
+func TestRetryCheckUntilBreak(t *test.T) {
+	for range 3 { // want "retrying a check or test body"
+		if err := check(); err != nil {
+			continue
+		}
+		break
+	}
+}
+
 func TestRetrySubtest(t *test.T) {
 	for range 3 { // want "retrying a check or test body"
 		if t.Run("body", func(t *test.T) { t.Fatal("failure") }) {

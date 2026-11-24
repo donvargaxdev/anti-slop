@@ -54,6 +54,23 @@ func TestNumericCases(t *testing.T) {
 	}
 }
 
+func TestContinueToNextCase(t *testing.T) {
+	for i := 0; i < 3; i++ {
+		if err := validate(i); err != nil {
+			t.Error(err)
+			continue
+		}
+		t.Run(strconv.Itoa(i), func(t *testing.T) {})
+	}
+}
+
+func validate(i int) error {
+	if i == 1 {
+		return os.ErrInvalid
+	}
+	return nil
+}
+
 func check() error { return nil }
 
 func TestFailure(t *testing.T) {

@@ -20,17 +20,19 @@ func runPolling(pass *analysis.Pass) (any, error) {
 	info := pass.TypesInfo
 	receives := deadlineReceives(pass)
 	visitTests(pass, func(node ast.Node) {
-		var condition ast.Expr
+		var pollsInHeader bool
 		var body *ast.BlockStmt
 		switch loop := node.(type) {
 		case *ast.ForStmt:
-			condition, body = loop.Cond, loop.Body
+			body = loop.Body
+			// The initializer takes one sample. The post statement can refresh it.
+			pollsInHeader = readsClock(info, loop.Cond) || usesClockAssignment(info, loop.Cond, loop.Post)
 		case *ast.RangeStmt:
 			body = loop.Body
 		default:
 			return
 		}
-		if readsClock(info, condition) || pollsInBody(info, body, receives) {
+		if pollsInHeader || pollsInBody(info, body, receives) {
 			report(pass, node, "polling against the wall clock")
 		}
 	})
@@ -296,15 +298,15 @@ func pollsInBody(info *types.Info, body *ast.BlockStmt, receives map[*ast.UnaryE
 func guardedByClock(info *types.Info, parents []ast.Node) bool {
 	for _, node := range parents {
 		if stmt, ok := node.(*ast.IfStmt); ok &&
-			(readsClock(info, stmt.Cond) || usesClockInitializer(info, stmt)) {
+			(readsClock(info, stmt.Cond) || usesClockAssignment(info, stmt.Cond, stmt.Init)) {
 			return true
 		}
 	}
 	return false
 }
 
-func usesClockInitializer(info *types.Info, stmt *ast.IfStmt) bool {
-	assignment, ok := stmt.Init.(*ast.AssignStmt)
+func usesClockAssignment(info *types.Info, condition ast.Expr, stmt ast.Stmt) bool {
+	assignment, ok := stmt.(*ast.AssignStmt)
 	if !ok || len(assignment.Lhs) != len(assignment.Rhs) {
 		return false
 	}
@@ -314,7 +316,7 @@ func usesClockInitializer(info *types.Info, stmt *ast.IfStmt) bool {
 			continue
 		}
 		object := info.ObjectOf(ident)
-		if contains(stmt.Cond, func(node ast.Node) bool {
+		if contains(condition, func(node ast.Node) bool {
 			use, ok := node.(*ast.Ident)
 			return ok && info.Uses[use] == object
 		}) {

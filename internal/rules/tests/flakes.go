@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"go/types"
 	"maps"
+	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -98,10 +99,10 @@ func (c flakeChecks) retriesLoop(body *ast.BlockStmt) bool {
 			c.rememberOutcome(node)
 		}
 		// Inspect an if at its condition so its initializer has already been visited.
-		if len(parents) > 0 {
-			if stmt, ok := parents[len(parents)-1].(*ast.IfStmt); ok && node == stmt.Cond {
-				found = exitsAttempt(c.failureBranch(stmt, false, body), false) ||
-					exitsAttempt(c.failureBranch(stmt, true, body), true)
+		if count := len(parents); count >= 2 {
+			if stmt, ok := parents[count-1].(*ast.IfStmt); ok && node == stmt.Cond {
+				found = exitsAttempt(lastStatement(c.failureBranch(stmt, false, body))) ||
+					c.continuesUntilSuccess(stmt, body, parents[count-2])
 			}
 		}
 		return !found
@@ -216,21 +217,39 @@ func booleanResult(info *types.Info, expr ast.Expr) bool {
 	return typ != nil && types.Identical(typ.Underlying(), types.Typ[types.Bool])
 }
 
-func exitsAttempt(branch ast.Stmt, failure bool) bool {
-	if branch == nil {
-		return false
-	}
+func lastStatement(branch ast.Stmt) ast.Stmt {
 	block, ok := branch.(*ast.BlockStmt)
 	if !ok || len(block.List) == 0 {
-		return false
+		return nil
 	}
-	switch last := block.List[len(block.List)-1].(type) {
+	return block.List[len(block.List)-1]
+}
+
+func exitsAttempt(stmt ast.Stmt) bool {
+	switch stmt := stmt.(type) {
 	case *ast.ReturnStmt:
-		return !failure
+		return true
 	case *ast.BranchStmt:
-		return last.Tok == token.BREAK && !failure || last.Tok == token.CONTINUE && failure
+		return stmt.Tok == token.BREAK
 	}
 	return false
+}
+
+func (c flakeChecks) continuesUntilSuccess(stmt *ast.IfStmt, body *ast.BlockStmt, parent ast.Node) bool {
+	if stmt.Else != nil || c.failureBranch(stmt, true, body) != stmt.Body {
+		return false
+	}
+	branch, ok := lastStatement(stmt.Body).(*ast.BranchStmt)
+	if !ok || branch.Tok != token.CONTINUE {
+		return false
+	}
+	// A continue on failure is retry evidence only if success leaves the loop.
+	block, ok := parent.(*ast.BlockStmt)
+	if !ok {
+		return false
+	}
+	next := slices.Index(block.List, ast.Stmt(stmt)) + 1
+	return next < len(block.List) && exitsAttempt(block.List[next])
 }
 
 func wrapsTestInRetry(info *types.Info, call *ast.CallExpr) bool {

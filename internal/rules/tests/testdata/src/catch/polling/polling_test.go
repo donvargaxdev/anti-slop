@@ -35,6 +35,16 @@ func TestPollWithDeadline(t *testing.T) {
 	}
 }
 
+func TestClockRefreshedInLoopHeader(t *testing.T) {
+	end := Now().Add(Second)
+	for now := Now(); now.Before(end); now = Now() { // want "polling against the wall clock"
+	}
+	start := Now()
+	var elapsed Duration
+	for i := 0; elapsed < Second && i < 3; i, elapsed = i+1, Since(start) { // want "polling against the wall clock"
+	}
+}
+
 func TestDeadlineAssignedDuringLoop(t *testing.T) {
 	var ch <-chan Time
 	for range 3 { // want "polling against the wall clock"
