@@ -4,6 +4,8 @@ package loader
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
 	"go/token"
 	"path/filepath"
 	"strings"
@@ -20,10 +22,11 @@ import (
 // folder.
 type Checker struct{ Dir string }
 
-var _ port.Checker = Checker{}
-
-// Check loads the packages of patterns with their tests, parses their files
-// and gives each finding of the rule once. A package that cannot be loaded or
+// Check loads the packages of patterns with their tests, parses the source
+// files they list as written, never the rewritten input of cgo, so a license
+// header stays the first comment of its file, and gives each finding of the
+// rule once. A package that cannot be loaded or parsed is a Failed failure with
+// the first error, and a done ctx is Cancelled.
 // parsed is a Failed failure with the loader's first error, and a done ctx is
 // Cancelled.
 func (c Checker) Check(ctx context.Context, patterns []string) ([]port.Finding, port.CheckFailure) {
@@ -33,7 +36,7 @@ func (c Checker) Check(ctx context.Context, patterns []string) ([]port.Finding, 
 		Dir:     c.Dir,
 		Fset:    fset,
 		Tests:   true,
-		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax,
+		Mode:    packages.NeedName | packages.NeedFiles,
 	}, patterns...)
 	if ctx.Err() != nil {
 		return nil, &port.Cancelled{}
@@ -50,8 +53,16 @@ func (c Checker) Check(ctx context.Context, patterns []string) ([]port.Finding, 
 		if len(pkg.Errors) > 0 {
 			return nil, &port.Failed{Reason: pkg.Errors[0].Error()}
 		}
+		files := make([]*ast.File, 0, len(pkg.GoFiles))
+		for _, name := range pkg.GoFiles {
+			file, err := parser.ParseFile(fset, name, nil, parser.ParseComments|parser.SkipObjectResolution)
+			if err != nil {
+				return nil, &port.Failed{Reason: err.Error()}
+			}
+			files = append(files, file)
+		}
 		var reported []port.Finding
-		comments.Report(pkg.Syntax, func(d analysis.Diagnostic) {
+		comments.Report(files, func(d analysis.Diagnostic) {
 			at := fset.Position(d.Pos)
 			reported = append(reported, port.Finding{
 				Path: relative(root, at.Filename), Line: at.Line, Col: at.Column, Rule: d.Category, Reason: d.Message,
