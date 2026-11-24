@@ -83,6 +83,7 @@ linters:
             - "!**/internal/cli/**"
             - "!**/internal/version/**"
             - "!**/internal/release/**"
+            - "!**/internal/rules/**"
             - "!**/internal/slices/*/*/**"
             - "!**/internal/engine/*/*/**"
           allow:
@@ -187,9 +188,10 @@ linters:
           allow:
             - "github.com/donvargaxdev/anti-slop/internal/slices/"
             - "github.com/donvargaxdev/anti-slop/internal/engine/"
+            - "github.com/donvargaxdev/anti-slop/internal/rules/"
           deny:
             - pkg: "github.com/donvargaxdev/anti-slop/"
-              desc: "adapters import only their own engine's port, or other engines' APIs"
+              desc: "adapters import only their own engine's port, other engines' APIs, or a rule"
         porttest:
           list-mode: strict
           files:
@@ -199,6 +201,39 @@ linters:
             - "$gostd"
             - "github.com/donvargaxdev/anti-slop/internal/slices/"
             - "github.com/donvargaxdev/anti-slop/internal/engine/"
+        # A rule is a go/analysis pass over syntax: internal/rules/<name>
+        # imports the standard library and the analysis framework, nothing of
+        # ours. The slice that runs it reaches it only through an adapter.
+        rule:
+          list-mode: strict
+          files:
+            - "**/internal/rules/**"
+            - "!$test"
+          allow:
+            - "$gostd"
+            - "golang.org/x/tools/go/analysis$"
+          deny:
+            - pkg: "os"
+              desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
+            - pkg: "net"
+              desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
+            - pkg: "syscall"
+              desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
+            - pkg: "io/ioutil$"
+              desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
+            - pkg: "path/filepath$"
+              desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
+            - pkg: "plugin$"
+              desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
+        rule-tests:
+          list-mode: strict
+          files:
+            - "**/internal/rules/**/*_test.go"
+          allow:
+            - "$gostd"
+            - "golang.org/x/tools/go/analysis$"
+            - "golang.org/x/tools/go/analysis/analysistest$"
+            - "github.com/donvargaxdev/anti-slop/internal/rules/"
         command:
           list-mode: strict
           files:

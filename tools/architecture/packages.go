@@ -102,6 +102,9 @@ func classify(path string) role {
 		}
 	}
 	parts := strings.Split(path, "/")
+	if len(parts) >= 3 && parts[0] == "internal" && parts[1] == "rules" {
+		return role{kind: "rule", owner: strings.Join(parts[:3], "/"), root: strings.Join(parts[:3], "/")}
+	}
 	if len(parts) >= 4 && parts[0] == "internal" && (parts[1] == "slices" || parts[1] == "engine") {
 		owner := strings.Join(parts[:3], "/")
 		layer := parts[3]

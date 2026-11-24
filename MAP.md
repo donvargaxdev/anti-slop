@@ -43,3 +43,13 @@ test command. Add an entry for each slice or domain; say where to look, not what
 - Start: `.github/workflows/nightly.yml` and the `tools/bin/nightly-*` and `e2e-coverage` it
   runs; `nightly-report` writes the issue. Fuzz targets are `Fuzz*` tests.
 - Test: `go test ./tools/bin/nightly-report/`; the rest runs in the nightly.
+
+## Comments rule
+
+- Start: `internal/rules/comments/comments.go`, the `go/analysis` pass; fixtures: `testdata/src/catch`
+  (must catch) and `testdata/src/leave` (must leave), run by `comments_test.go`.
+- Slice: `internal/slices/comments/command` (the `comments` command, its `Patterns` and `Classify`),
+  `port` (`Checker` and its failures), `loader` (the adapter: go list, then the rule), `port/porttest`
+  (the fake and `CheckerContract`, which the fake and the loader both pass).
+- Scenarios: `features/comments.feature`; the ones that load packages are `@binary-only`.
+- Test: `go test ./internal/rules/... ./internal/slices/comments/... ./cmd/... -count=1`

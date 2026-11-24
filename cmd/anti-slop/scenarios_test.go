@@ -13,6 +13,7 @@ import (
 	"github.com/donvargaxdev/anti-slop/features"
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/port"
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/port/porttest"
+	commentsporttest "github.com/donvargaxdev/anti-slop/internal/slices/comments/port/porttest"
 )
 
 // The feature files run in process (decision 14): the steps of package
@@ -105,7 +106,7 @@ func (m *memory) inProcessAdapters() adapters {
 	for name := range m.folders {
 		failures[name] = porttest.Unreadable(name)
 	}
-	return adapters{Files: porttest.Files{Data: m.files, Failures: failures}}
+	return adapters{Files: porttest.Files{Data: m.files, Failures: failures}, Comments: commentsporttest.Checker{}}
 }
 
 // cleanEnv unsets every ANTI_SLOP_ variable and sets the run's, and

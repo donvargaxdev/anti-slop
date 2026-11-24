@@ -3100,5 +3100,68 @@
     "Import": "$module/internal/release",
     "Kind": "graph",
     "Rule": "toplevel"
+  },
+  {
+    "Name": "rule-allows-the-analysis-framework",
+    "File": "internal/rules/newrule/probe.go",
+    "Import": "golang.org/x/tools/go/analysis",
+    "Kind": "allow",
+    "Rule": "siblings"
+  },
+  {
+    "Name": "rule-refuses-os",
+    "File": "internal/rules/newrule/probe.go",
+    "Import": "os",
+    "Kind": "lint",
+    "Rule": "rule"
+  },
+  {
+    "Name": "rule-refuses-the-package-loader",
+    "File": "internal/rules/newrule/probe.go",
+    "Import": "golang.org/x/tools/go/packages",
+    "Kind": "lint",
+    "Rule": "rule"
+  },
+  {
+    "Name": "rule-refuses-an-adapter",
+    "File": "internal/rules/newrule/probe.go",
+    "Import": "$module/internal/engine/count/disk",
+    "Kind": "lint",
+    "Rule": "rule"
+  },
+  {
+    "Name": "rule-refuses-another-rule",
+    "File": "internal/rules/newrule/probe.go",
+    "Import": "$module/internal/rules/otherrule",
+    "Kind": "graph",
+    "Rule": "siblings"
+  },
+  {
+    "Name": "rule-adapter-allows-a-rule",
+    "File": "internal/slices/fresh/loader/probe.go",
+    "Import": "$module/internal/rules/newrule",
+    "Kind": "allow",
+    "Rule": "siblings"
+  },
+  {
+    "Name": "rule-command-refuses-a-rule",
+    "File": "internal/slices/fresh/command/probe.go",
+    "Import": "$module/internal/rules/newrule",
+    "Kind": "lint",
+    "Rule": "command"
+  },
+  {
+    "Name": "rule-domain-refuses-a-rule",
+    "File": "internal/engine/fresh/domain/probe.go",
+    "Import": "$module/internal/rules/newrule",
+    "Kind": "graph",
+    "Rule": "siblings"
+  },
+  {
+    "Name": "rule-engine-adapter-allows-a-rule",
+    "File": "internal/engine/fresh/disk/probe.go",
+    "Import": "$module/internal/rules/newrule",
+    "Kind": "allow",
+    "Rule": "siblings"
   }
 ]
