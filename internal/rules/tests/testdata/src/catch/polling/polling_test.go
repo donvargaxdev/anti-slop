@@ -80,8 +80,18 @@ func TestPollUntilFatal(t *testing.T) {
 func TestPollUntilFatalf(t *testing.T) {
 	start := Now()
 	for range 3 { // want "polling against the wall clock"
-		if elapsed := Since(start); Since(start) > Second {
+		if elapsed := Since(start); elapsed > Second {
 			t.Fatalf("timed out after %v", elapsed)
+		}
+	}
+}
+
+func TestPollWithAssignedClock(t *testing.T) {
+	start := Now()
+	var remaining Duration
+	for { // want "polling against the wall clock"
+		if remaining = Until(start.Add(Second)); remaining <= 0 {
+			break
 		}
 	}
 }

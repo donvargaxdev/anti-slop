@@ -101,7 +101,29 @@ func pollsInBody(info *types.Info, body *ast.BlockStmt, deadlines map[types.Obje
 
 func guardedByClock(info *types.Info, parents []ast.Node) bool {
 	for _, node := range parents {
-		if stmt, ok := node.(*ast.IfStmt); ok && readsClock(info, stmt.Cond) {
+		if stmt, ok := node.(*ast.IfStmt); ok &&
+			(readsClock(info, stmt.Cond) || usesClockInitializer(info, stmt)) {
+			return true
+		}
+	}
+	return false
+}
+
+func usesClockInitializer(info *types.Info, stmt *ast.IfStmt) bool {
+	assignment, ok := stmt.Init.(*ast.AssignStmt)
+	if !ok || len(assignment.Lhs) != len(assignment.Rhs) {
+		return false
+	}
+	for i, value := range assignment.Rhs {
+		ident, ok := ast.Unparen(assignment.Lhs[i]).(*ast.Ident)
+		if !ok || ident.Name == "_" || !readsClock(info, value) {
+			continue
+		}
+		object := info.ObjectOf(ident)
+		if contains(stmt.Cond, func(node ast.Node) bool {
+			use, ok := node.(*ast.Ident)
+			return ok && info.Uses[use] == object
+		}) {
 			return true
 		}
 	}

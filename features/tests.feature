@@ -50,7 +50,7 @@ Feature: Test reliability
       func TestTimeout(t *testing.T) {
           started := time.Now()
           for {
-              if time.Since(started) > time.Second {
+              if elapsed := time.Since(started); elapsed > time.Second {
                   t.Fatal("timeout")
               }
           }

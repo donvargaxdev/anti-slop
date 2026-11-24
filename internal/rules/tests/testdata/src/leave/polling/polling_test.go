@@ -43,6 +43,15 @@ func TestTimingDoesNotCauseFailureExit(t *testing.T) {
 	}
 }
 
+func TestTimingOnlyForFailureMessage(t *testing.T) {
+	start := time.Now()
+	for range 3 {
+		if elapsed, failed := time.Since(start), t.Failed(); failed {
+			t.Fatalf("failed after %v", elapsed)
+		}
+	}
+}
+
 func TestClosureDoesNotReadClockInCondition(t *testing.T) {
 	for condition(func() time.Time { return time.Now() }) {
 		break
