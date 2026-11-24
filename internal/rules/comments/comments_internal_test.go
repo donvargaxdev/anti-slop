@@ -27,7 +27,7 @@ func TestNolintNeedsALinterAndAReasonAfterIt(t *testing.T) {
 	} {
 		file := parse(t, "package p\n\n"+tc.comment+"\nfunc F() {}\n")
 		got := ""
-		if found := findings(file); len(found) > 0 {
+		if found := findings(file, false); len(found) > 0 {
 			got = found[0].Message
 		}
 		if got != tc.want {
@@ -55,7 +55,7 @@ func TestADirectiveIsReadOnlyWithoutASpaceAfterTheSlashes(t *testing.T) {
 	} {
 		file := parse(t, "package p\n\nfunc F() {}\n\n"+tc.comment+"\n")
 		got := ""
-		if found := findings(file); len(found) > 0 {
+		if found := findings(file, false); len(found) > 0 {
 			got = found[0].Message
 		}
 		if got != tc.want {
@@ -66,7 +66,7 @@ func TestADirectiveIsReadOnlyWithoutASpaceAfterTheSlashes(t *testing.T) {
 
 func TestAMutationBlockEndsAtItsClosingLine(t *testing.T) {
 	file := parse(t, "package p\n\n// itos-cc mutation: 1 killed\n// survived: line 1\n// end itos-cc mutation\n// after the block\nfunc F() {}\n")
-	found := findings(file)
+	found := findings(file, false)
 	if len(found) != 1 || file.Comments[0].List[3].Slash != found[0].Pos {
 		t.Fatalf("findings = %v, want only the comment after the block", found)
 	}
@@ -91,7 +91,7 @@ func TestOnlyALicenseHeaderBeforeThePackageClauseIsLeftAlone(t *testing.T) {
 		{"license after the package clause", "package p\n\n// Copyright 2026 A.\nfunc F() {}\n", 1},
 		{"every comment of the header", "// Copyright 2026 A.\n// All rights reserved.\n// Anything else.\n\npackage p\n", 0},
 	} {
-		if got := len(findings(parse(t, tc.source))); got != tc.want {
+		if got := len(findings(parse(t, tc.source), false)); got != tc.want {
 			t.Errorf("%s: %d findings, want %d", tc.name, got, tc.want)
 		}
 	}
@@ -113,7 +113,7 @@ func G() {}
 // This follows the user's preference.
 func H() {}
 `)
-	found := findings(file)
+	found := findings(file, false)
 	if len(found) != 2 || found[0].Pos != file.Comments[3].Pos() || found[1].Pos != file.Comments[4].Pos() {
 		t.Fatalf("findings = %v, want only the ordinary comments", found)
 	}
@@ -129,7 +129,7 @@ func TestOnlyThePreambleCgoConsumesIsPreserved(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			file := parse(t, "package p\n\n"+tc.imports+"\n\n// Go documentation\nvar F int\n")
-			found := findings(file)
+			found := findings(file, false)
 			if len(found) != 1 || found[0].Pos != file.Comments[1].Pos() {
 				t.Fatalf("findings = %v, want only the Go documentation", found)
 			}
@@ -148,7 +148,7 @@ func TestImportCommentsThatCgoDoesNotConsumeAreReported(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			file := parse(t, "package p\n\n"+tc.imports+"\n")
-			found := findings(file)
+			found := findings(file, false)
 			if len(found) != 1 || found[0].Pos != file.Comments[0].Pos() {
 				t.Fatalf("findings = %v, want the comment that is outside a cgo preamble", found)
 			}
@@ -173,7 +173,7 @@ func TestOnlyExportDirectivesThatCgoConsumesArePreserved(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			file := parse(t, "package p\n\n"+tc.imports+"\n\n"+tc.declaration+"\n")
-			found := findings(file)
+			found := findings(file, false)
 			if len(found) != tc.want {
 				t.Fatalf("findings = %v, want %d", found, tc.want)
 			}

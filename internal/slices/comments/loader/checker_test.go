@@ -3,6 +3,7 @@ package loader_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/donvargaxdev/anti-slop/internal/slices/comments/loader"
@@ -45,6 +46,25 @@ func TestTheLoaderGivesPathsBelowItsFolderAndTheirPlace(t *testing.T) {
 		Reason: "no tool reads this comment: let the code explain itself and a test carry the why",
 	}
 	if failure != nil || len(got) != 1 || got[0] != want {
+		t.Errorf("Check = %v, %v, want %v", got, failure, want)
+	}
+}
+
+func TestTheLoaderReportsDistinctPhysicalPositionsAfterLineDirectives(t *testing.T) {
+	dir := module(t, map[string]string{"p.go": `package p
+
+//line remapped.go:100
+// First comment.
+//line remapped.go:100
+// Second comment.
+`})
+	got, failure := loader.Checker{Dir: dir}.Check(t.Context(), []string{"./..."})
+	const reason = "no tool reads this comment: let the code explain itself and a test carry the why"
+	want := []port.Finding{
+		{Path: "p.go", Line: 4, Col: 1, Rule: "comments", Reason: reason},
+		{Path: "p.go", Line: 6, Col: 1, Rule: "comments", Reason: reason},
+	}
+	if failure != nil || !slices.Equal(got, want) {
 		t.Errorf("Check = %v, %v, want %v", got, failure, want)
 	}
 }

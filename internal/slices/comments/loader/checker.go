@@ -26,7 +26,13 @@ type Checker struct{ Dir string }
 // files they list, and gives each finding once. The original source preserves
 // cgo license headers and preambles. A package that cannot be loaded or parsed
 // is a Failed failure with the first error, and a done ctx is Cancelled.
-func (c Checker) Check(ctx context.Context, patterns []string) ([]port.Finding, port.CheckFailure) {
+func (c Checker) Check(ctx context.Context, patterns []string) (found []port.Finding, failure port.CheckFailure) {
+	defer func() {
+		if ctx.Err() != nil {
+			found, failure = nil, &port.Cancelled{}
+		}
+	}()
+
 	fset := token.NewFileSet()
 	pkgs, err := packages.Load(&packages.Config{
 		Context: ctx,
@@ -35,9 +41,6 @@ func (c Checker) Check(ctx context.Context, patterns []string) ([]port.Finding, 
 		Tests:   true,
 		Mode:    packages.NeedName | packages.NeedFiles,
 	}, patterns...)
-	if ctx.Err() != nil {
-		return nil, &port.Cancelled{}
-	}
 	if err != nil {
 		return nil, &port.Failed{Reason: err.Error()}
 	}
@@ -45,13 +48,12 @@ func (c Checker) Check(ctx context.Context, patterns []string) ([]port.Finding, 
 		return nil, &port.Failed{Reason: "the patterns match no package"}
 	}
 	root, _ := filepath.Abs(c.Dir)
-	var found []port.Finding
 	for _, pkg := range pkgs {
 		if len(pkg.Errors) > 0 {
 			return nil, &port.Failed{Reason: pkg.Errors[0].Error()}
 		}
 		failure := reportSources(ctx, fset, pkg.GoFiles, func(d analysis.Diagnostic) {
-			at := fset.Position(d.Pos)
+			at := fset.PositionFor(d.Pos, false)
 			found = append(found, port.Finding{
 				Path: relative(root, at.Filename), Line: at.Line, Col: at.Column, Rule: d.Category, Reason: d.Message,
 			})
@@ -60,11 +62,7 @@ func (c Checker) Check(ctx context.Context, patterns []string) ([]port.Finding, 
 			return nil, failure
 		}
 	}
-	found = port.Merge(nil, found)
-	if ctx.Err() != nil {
-		return nil, &port.Cancelled{}
-	}
-	return found, nil
+	return port.Merge(nil, found), nil
 }
 
 func reportSources(ctx context.Context, fset *token.FileSet, names []string, report func(analysis.Diagnostic)) port.CheckFailure {
@@ -73,13 +71,10 @@ func reportSources(ctx context.Context, fset *token.FileSet, names []string, rep
 			break
 		}
 		file, err := parser.ParseFile(fset, name, nil, parser.ParseComments|parser.SkipObjectResolution)
-		if ctx.Err() != nil {
-			break
-		}
 		if err != nil {
 			return &port.Failed{Reason: err.Error()}
 		}
-		comments.Report([]*ast.File{file}, report)
+		comments.Report(fset, []*ast.File{file}, report)
 	}
 	if ctx.Err() != nil {
 		return &port.Cancelled{}

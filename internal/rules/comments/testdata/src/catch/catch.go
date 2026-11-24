@@ -27,3 +27,7 @@ func NotAnnotation() {}
 
 //sumtype:declaration // want "no tool reads"
 type NotSumType interface{ marker() }
+
+func Example() {
+	// Output: this is outside a test file. // want "no tool reads"
+}

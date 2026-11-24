@@ -5,7 +5,8 @@ Feature: Comments
   comment that says why are findings alike. The comments a tool reads are left alone: the
   //go: and //line directives, //nolint:<linter> with a reason after it, a license header, a
   generated-file marker and a mutation annotation. Source attribution notices, cgo
-  preambles, cgo export directives and gochecksumtype declarations are also preserved.
+  preambles, cgo export directives, gochecksumtype declarations and example output
+  directives are also preserved. Findings use physical source positions.
   Each finding is one line on stdout,
   path:line:col: comments: <reason>. The command only reports: it exits 0 with findings and
   with none. Its patterns are read as go list reads them, so a pattern that matches no
@@ -24,12 +25,13 @@ Feature: Comments
       """
       package p
 
+      //line remapped.go:100
       // F does a thing.
       func F() {}
       """
     When anti-slop runs with "comments ./..."
     Then it exits with code 0
-    And its standard output says "p.go:3:1: comments: "
+    And its standard output says "p.go:4:1: comments: "
     And its standard output is one line
 
   @ID-COMMENTS-02 @comments-rule @binary-only
@@ -59,6 +61,18 @@ Feature: Comments
 
       //sumtype:decl
       type Failure interface { failure() }
+      """
+    And the file "p_test.go" holds:
+      """
+      package p
+
+      import "fmt"
+
+      func Example() {
+          fmt.Println("hello")
+          // Output:
+          // hello
+      }
       """
     When anti-slop runs with "comments ./..."
     Then it exits with code 0

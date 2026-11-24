@@ -5,8 +5,8 @@
 // The comments a tool reads, and so the ones left alone, are the //go:
 // directives (a build constraint is one) and the line directives, //nolint:
 // with a linter and a reason after it, the marker of a generated file, a
-// mutation annotation, cgo preambles, cgo export directives and the
-// //sumtype:decl declaration read by gochecksumtype. License headers and
+// mutation annotation, cgo preambles, cgo export directives, example output
+// directives and the //sumtype:decl declaration read by gochecksumtype. License headers and
 // source attribution notices are also preserved. The Analyzer reports every
 // other comment at its start.
 package comments
@@ -14,9 +14,11 @@ package comments
 import (
 	"go/ast"
 	"go/build/constraint"
+	"go/doc"
 	"go/token"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -53,26 +55,31 @@ var sourceAttribution = regexp.MustCompile(`(?i)\b(?:(?:adapted|copied|derived|h
 	`|\bfollows?\s+` + sourceProject + `'s\s+[\w-]+\s+design\b`)
 
 func run(pass *analysis.Pass) (any, error) {
-	Report(pass.Files, pass.Report)
+	Report(pass.Fset, pass.Files, pass.Report)
 	return nil, nil
 }
 
 // Report gives each finding of the rule in files to report, in the order of
 // the files and of each file's comments.
-func Report(files []*ast.File, report func(analysis.Diagnostic)) {
+func Report(fset *token.FileSet, files []*ast.File, report func(analysis.Diagnostic)) {
 	for _, file := range files {
-		for _, d := range findings(file) {
+		testFile := strings.HasSuffix(fset.PositionFor(file.Package, false).Filename, "_test.go")
+		for _, d := range findings(file, testFile) {
 			report(d)
 		}
 	}
 }
 
-func findings(file *ast.File) []analysis.Diagnostic {
+func findings(file *ast.File, testFile bool) []analysis.Diagnostic {
 	header := licenseHeader(file)
 	cgo := cgoComments(file)
+	var outputs map[*ast.CommentGroup]bool
+	if testFile {
+		outputs = exampleOutputs(file)
+	}
 	var out []analysis.Diagnostic
 	for _, group := range file.Comments {
-		if group == header || sourceAttribution.MatchString(group.Text()) {
+		if group == header || outputs[group] || sourceAttribution.MatchString(group.Text()) {
 			continue
 		}
 		annotation := false
@@ -96,6 +103,32 @@ func findings(file *ast.File) []analysis.Diagnostic {
 		}
 	}
 	return out
+}
+
+func exampleOutputs(file *ast.File) map[*ast.CommentGroup]bool {
+	outputs := make(map[*ast.CommentGroup]bool)
+	for _, example := range doc.Examples(file) {
+		if example.Output == "" && !example.EmptyOutput {
+			continue
+		}
+		body, ok := example.Code.(*ast.BlockStmt)
+		if !ok {
+			// go/doc uses the entire file as Code for a standalone example
+			// with helper declarations. Find the example's own body.
+			index := slices.IndexFunc(file.Decls, func(decl ast.Decl) bool {
+				fn, ok := decl.(*ast.FuncDecl)
+				return ok && fn.Name.Name == "Example"+example.Name && fn.Recv == nil &&
+					fn.Type.Params.NumFields() == 0 && fn.Type.Results.NumFields() == 0 && fn.Body != nil
+			})
+			body = file.Decls[index].(*ast.FuncDecl).Body
+		}
+		// go/doc reads output from the last comment group inside the body.
+		end := sort.Search(len(file.Comments), func(i int) bool {
+			return file.Comments[i].End() > body.End()
+		})
+		outputs[file.Comments[end-1]] = true
+	}
+	return outputs
 }
 
 func licenseHeader(file *ast.File) *ast.CommentGroup {
