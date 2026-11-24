@@ -128,6 +128,32 @@ func TestDeadlineOnOneTypeSwitchCase(t *testing.T) {
 	}
 }
 
+func pollAfterSelect(gate <-chan struct{}, ready <-chan Time) {
+	ch := After(Millisecond)
+	select {
+	case <-gate:
+		ch = ready
+	default:
+	}
+	for { // want "polling against the wall clock"
+		select {
+		case <-ch:
+			return
+		default:
+		}
+	}
+}
+
+func pollInSelectCommunication(replacement <-chan (<-chan Time)) {
+	ch := After(Millisecond)
+	for range 1 { // want "polling against the wall clock"
+		select {
+		case ch = <-replacement:
+		case <-ch:
+		}
+	}
+}
+
 func TestDeadlineInSwitchExpressions(t *testing.T) {
 	ch := After(Millisecond)
 	for range 1 { // want "polling against the wall clock"

@@ -184,6 +184,31 @@ func TestDeadlineReassignedAfterFallthrough(t *testing.T) {
 	}
 }
 
+func receiveAfterSelect(replacement <-chan (<-chan time.Time), ready <-chan time.Time) {
+	ch := time.After(time.Millisecond)
+	select {
+	case ch = <-replacement:
+	default:
+		ch = ready
+	}
+	for range 3 {
+		<-ch
+	}
+}
+
+func receiveInOtherSelectClause(gate <-chan struct{}, ready <-chan time.Time) {
+	ch := ready
+	for range 3 {
+		select {
+		case <-gate:
+			ch = time.After(time.Millisecond)
+		default:
+			<-ch
+		}
+		ch = ready
+	}
+}
+
 func TestTimingDoesNotExitLoop(t *testing.T) {
 	start := time.Now()
 	for range 3 {

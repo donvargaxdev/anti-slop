@@ -97,6 +97,8 @@ func (scan deadlineScan) visit(node ast.Node) bool {
 		scan.record(expr.Init)
 		scan.record(expr.Assign)
 		scan.recordSwitch(expr.Body)
+	case *ast.SelectStmt:
+		scan.recordSelect(expr.Body)
 	case *ast.ForStmt:
 		scan.record(expr.Init)
 		condition := scan.info.Types[expr.Cond].Value
@@ -121,6 +123,17 @@ func (scan deadlineScan) visit(node ast.Node) bool {
 		return true
 	}
 	return false
+}
+
+func (scan deadlineScan) recordSelect(body *ast.BlockStmt) {
+	entry := scan.fork()
+	clear(scan.channels)
+	// Each clause starts from the same state, and only the selected clause assigns values.
+	for _, stmt := range body.List {
+		branch := entry.fork()
+		branch.record(stmt)
+		maps.Copy(scan.channels, branch.channels)
+	}
 }
 
 func (scan deadlineScan) recordSwitch(body *ast.BlockStmt) {
