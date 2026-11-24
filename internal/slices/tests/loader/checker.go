@@ -34,22 +34,27 @@ func (c Checker) Check(ctx context.Context, patterns []string) (findings []port.
 	}
 
 	root, _ := filepath.Abs(c.Dir)
+	return checkPackages(ctx, pkgs, root, []*analysis.Analyzer{tests.Sleep, tests.Polling, tests.Environment, tests.Flakes})
+}
+
+func checkPackages(ctx context.Context, pkgs []*packages.Package, root string, analyzers []*analysis.Analyzer) ([]port.Finding, port.CheckFailure) {
+	var findings []port.Finding
 	for _, pkg := range pkgs {
 		if ctx.Err() != nil {
-			break
+			return nil, &port.Cancelled{}
 		}
 		if len(pkg.Errors) > 0 {
 			return nil, &port.Failed{Reason: pkg.Errors[0].Error()}
 		}
-		if err := checkPackage(pkg, root, &findings); err != nil {
+		if err := checkPackage(pkg, root, analyzers, &findings); err != nil {
 			return nil, &port.Failed{Reason: err.Error()}
 		}
 	}
 	return port.Merge(nil, findings), nil
 }
 
-func checkPackage(pkg *packages.Package, root string, findings *[]port.Finding) error {
-	for _, analyzer := range []*analysis.Analyzer{tests.Sleep, tests.Polling, tests.Environment, tests.Flakes} {
+func checkPackage(pkg *packages.Package, root string, analyzers []*analysis.Analyzer, findings *[]port.Finding) error {
+	for _, analyzer := range analyzers {
 		pass := &analysis.Pass{
 			Analyzer:  analyzer,
 			Fset:      pkg.Fset,

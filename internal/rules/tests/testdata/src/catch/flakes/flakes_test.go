@@ -77,12 +77,36 @@ func TestRetryCallback(t *test.T) {
 	retry(func() { t.Fatal("check") }) // want "retrying a test body"
 }
 
-func retryTest(t *test.T, body func(*test.T)) {
-	body(t)
-}
-
 func body(t *test.T) { t.Fatal("check") }
 
-func TestRetryNamedCallback(t *test.T) {
-	retryTest(t, body) // want "retrying a test body"
+func probe() bool { return true }
+
+func TestRetryUntilCheckPasses(t *test.T) {
+	for range 3 { // want "retrying a check or test body"
+		if probe() {
+			break
+		}
+	}
+	for range 3 { // want "retrying a check or test body"
+		if check() == nil {
+			break
+		}
+	}
+}
+
+func TestSkipOnCompoundFailure(t *test.T) {
+	if t.Failed() && !test.Short() {
+		t.Skip("failed outside short mode") // want "skipping after a failure"
+	}
+	if t.Failed() || check() != nil {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func retrySubtest[T any](body func(*T))        {}
+func retryTest[T, C any](ctx C, body func(*T)) {}
+
+func TestGenericRetry(t *test.T) {
+	retrySubtest[test.T](body)                 // want "retrying a test body"
+	retryTest[test.T, string]("context", body) // want "retrying a test body"
 }

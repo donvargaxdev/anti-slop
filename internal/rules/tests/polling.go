@@ -88,6 +88,11 @@ func pollsInBody(info *types.Info, body *ast.BlockStmt, deadlines map[types.Obje
 			found = guardedByClock(info, parents)
 		case *ast.BranchStmt:
 			found = expr.Tok == token.BREAK && breaksLoop(info, expr, body, parents) && guardedByClock(info, parents)
+		case *ast.ExprStmt:
+			if call, ok := ast.Unparen(expr.X).(*ast.CallExpr); ok &&
+				testingMethod(info, call, "Fatal", "Fatalf", "FailNow") {
+				found = guardedByClock(info, parents)
+			}
 		}
 		return !found
 	})

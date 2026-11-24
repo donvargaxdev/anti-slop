@@ -9,6 +9,10 @@ type fakeClock struct{}
 
 func (fakeClock) Now() bool { return false }
 
+type fakeTest struct{}
+
+func (fakeTest) Fatal(string) {}
+
 func TestPoll(t *testing.T) {
 	start := time.Now()
 	for range 3 {
@@ -25,6 +29,27 @@ func TestPoll(t *testing.T) {
 		t.Fatal("timeout")
 	}
 }
+
+func TestTimingDoesNotCauseFailureExit(t *testing.T) {
+	start := time.Now()
+	for range 3 {
+		if time.Since(start) > time.Second {
+			fakeTest{}.Fatal("slow")
+			t.Error("slow")
+		}
+		if t.Failed() {
+			t.FailNow()
+		}
+	}
+}
+
+func TestClosureDoesNotReadClockInCondition(t *testing.T) {
+	for condition(func() time.Time { return time.Now() }) {
+		break
+	}
+}
+
+func condition(func() time.Time) bool { return false }
 
 func TestTimingDoesNotExitLoop(t *testing.T) {
 	start := time.Now()

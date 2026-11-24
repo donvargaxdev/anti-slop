@@ -40,7 +40,7 @@ func loaderQuery(pattern string) bool {
 		return false
 	}
 	for _, r := range key {
-		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z') {
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') {
 			return false
 		}
 	}

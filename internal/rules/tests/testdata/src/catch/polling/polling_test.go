@@ -67,3 +67,30 @@ poll:
 		}
 	}
 }
+
+func TestPollUntilFatal(t *testing.T) {
+	start := Now()
+	for { // want "polling against the wall clock"
+		if Since(start) > Second {
+			t.Fatal("timeout")
+		}
+	}
+}
+
+func TestPollUntilFatalf(t *testing.T) {
+	start := Now()
+	for range 3 { // want "polling against the wall clock"
+		if elapsed := Since(start); Since(start) > Second {
+			t.Fatalf("timed out after %v", elapsed)
+		}
+	}
+}
+
+func TestPollUntilFailNow(t *testing.T) {
+	deadline := Now().Add(Second)
+	for { // want "polling against the wall clock"
+		if Until(deadline) <= 0 {
+			t.FailNow()
+		}
+	}
+}
