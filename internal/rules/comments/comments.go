@@ -5,9 +5,10 @@
 // The comments a tool reads, and so the ones left alone, are the //go:
 // directives (a build constraint is one) and the line directives, //nolint:
 // with a linter and a reason after it, the marker of a generated file, a
-// mutation annotation, cgo preambles and cgo export directives. License headers and source
-// attribution notices are also preserved. The Analyzer reports every other
-// comment at its start.
+// mutation annotation, cgo preambles, cgo export directives and the
+// //sumtype:decl declaration read by gochecksumtype. License headers and
+// source attribution notices are also preserved. The Analyzer reports every
+// other comment at its start.
 package comments
 
 import (
@@ -174,6 +175,8 @@ func judge(c *ast.Comment) string {
 	text := c.Text
 	switch {
 	case strings.HasPrefix(text, "//go:"), strings.HasPrefix(text, "//line "), strings.HasPrefix(text, "/*line "):
+		return ""
+	case text == "//sumtype:decl":
 		return ""
 	case strings.HasPrefix(text, nolintPrefix):
 		if hasReason(text) {

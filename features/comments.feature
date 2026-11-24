@@ -5,7 +5,8 @@ Feature: Comments
   comment that says why are findings alike. The comments a tool reads are left alone: the
   //go: and //line directives, //nolint:<linter> with a reason after it, a license header, a
   generated-file marker and a mutation annotation. Source attribution notices, cgo
-  preambles and cgo export directives are also preserved. Each finding is one line on stdout,
+  preambles, cgo export directives and gochecksumtype declarations are also preserved.
+  Each finding is one line on stdout,
   path:line:col: comments: <reason>. The command only reports: it exits 0 with findings and
   with none. Its patterns are read as go list reads them, so a pattern that matches no
   package exits 82, and one go list would take for a flag exits 80. The command loads
@@ -55,6 +56,9 @@ Feature: Comments
 
       //nolint:gosec // the argument is checked at its edge
       func G() {}
+
+      //sumtype:decl
+      type Failure interface { failure() }
       """
     When anti-slop runs with "comments ./..."
     Then it exits with code 0

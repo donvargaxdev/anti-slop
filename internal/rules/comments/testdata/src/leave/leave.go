@@ -24,6 +24,9 @@ func Nolint() {}
 //nolint:gosec,revive // both name the same reason
 func Several() {}
 
+//sumtype:decl
+type Failure interface{ failure() }
+
 func Nothing() {}
 
 // itos-cc mutation: 1 killed, 1 survived, 0 uncovered

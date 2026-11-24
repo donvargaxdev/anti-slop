@@ -24,3 +24,6 @@ func NotGenerated() {}
 
 // itos-cc mutation is no annotation without its colon. // want "no tool reads"
 func NotAnnotation() {}
+
+//sumtype:declaration // want "no tool reads"
+type NotSumType interface{ marker() }
