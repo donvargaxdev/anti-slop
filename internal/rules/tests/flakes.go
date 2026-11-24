@@ -89,8 +89,6 @@ func (c flakeChecks) retriesLoop(body *ast.BlockStmt) bool {
 		switch node := node.(type) {
 		case nil, *ast.FuncLit, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
 			return false
-		case *ast.CallExpr:
-			found = testingMethod(c.info, node, "Run")
 		case *ast.IfStmt:
 			found = exitsAttempt(c.failureBranch(node, false, body), false) ||
 				exitsAttempt(c.failureBranch(node, true, body), true)

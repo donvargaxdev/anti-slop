@@ -34,3 +34,36 @@ func TestPollWithDeadline(t *testing.T) {
 		}
 	}
 }
+
+func TestPollUntilBreak(t *testing.T) {
+	start := Now()
+	for { // want "polling against the wall clock"
+		if Since(start) > Second {
+			break
+		}
+	}
+}
+
+func TestPollUntilReturn(t *testing.T) {
+	end := Now().Add(Second)
+	for range 3 { // want "polling against the wall clock"
+		if Now().Before(end) {
+			continue
+		} else {
+			return
+		}
+	}
+}
+
+func TestPollUntilLabeledBreak(t *testing.T) {
+	end := Now().Add(Second)
+poll:
+	for { // want "polling against the wall clock"
+		select {
+		default:
+			if Until(end) <= 0 {
+				break poll
+			}
+		}
+	}
+}

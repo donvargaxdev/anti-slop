@@ -42,6 +42,16 @@ func TestRetrySubtest(t *test.T) {
 	}
 }
 
+func TestRetryStoredSubtest(t *test.T) {
+	for i := 0; i < 3; i++ { // want "retrying a check or test body"
+		passed := t.Run("body", func(t *test.T) { t.Fatal("failure") })
+		if !passed {
+			continue
+		}
+		return
+	}
+}
+
 func TestSkipOnFailure(t *test.T) {
 	if err := check(); err != nil {
 		t.Skipf("failed: %v", err) // want "skipping after a failure"

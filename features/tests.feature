@@ -36,7 +36,11 @@ Feature: Test reliability
       func TestProbe(t *testing.T) {
           pause()
           started := time.Now()
-          for time.Since(started) < time.Second {}
+          for {
+              if time.Since(started) > time.Second {
+                  break
+              }
+          }
           _ = os.Setenv("MODE", "test")
           if t.Failed() {
               t.Skip("try again later")
@@ -49,13 +53,13 @@ Feature: Test reliability
       """
       p_test.go:10:5: tests: time.Sleep in test code
       p_test.go:16:5: tests: polling against the wall clock
-      p_test.go:17:9: tests: os.Setenv changes the process environment in test code
-      p_test.go:19:9: tests: skipping after a failure
+      p_test.go:21:9: tests: os.Setenv changes the process environment in test code
+      p_test.go:23:9: tests: skipping after a failure
       """
     And its error output is empty
 
   @ID-TESTS-02 @issue-3 @binary-only
-  Scenario: tests prints nothing for a test that uses cleanup and synchronization
+  Scenario: tests prints nothing for cleanup, synchronization and distinct subtests
     Given the file "go.mod" holds:
       """
       module example.test/m
@@ -70,7 +74,10 @@ Feature: Test reliability
       """
       package p_test
 
-      import "testing"
+      import (
+          "strconv"
+          "testing"
+      )
 
       func TestProbe(t *testing.T) {
           if testing.Short() {
@@ -80,6 +87,9 @@ Feature: Test reliability
           ready := make(chan struct{})
           close(ready)
           <-ready
+          for i := 0; i < 3; i++ {
+              t.Run(strconv.Itoa(i), func(t *testing.T) {})
+          }
       }
       """
     When anti-slop runs with "tests ./..."

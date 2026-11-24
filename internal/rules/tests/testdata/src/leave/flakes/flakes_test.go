@@ -2,6 +2,7 @@ package flakes
 
 import (
 	"os"
+	"strconv"
 	"testing"
 )
 
@@ -32,6 +33,17 @@ func TestCases(t *testing.T) {
 	}
 	for i := range len(cases) {
 		t.Run(cases[i], func(t *testing.T) {})
+	}
+}
+
+func TestNumericCases(t *testing.T) {
+	for i := 0; i < 3; i++ {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {})
+	}
+	count := 3
+	for i := range count {
+		passed := t.Run(strconv.Itoa(i), func(t *testing.T) {})
+		t.Log(i, passed)
 	}
 }
 
