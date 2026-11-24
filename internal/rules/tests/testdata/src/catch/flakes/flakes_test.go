@@ -16,6 +16,18 @@ func TestRetryCheck(t *test.T) {
 	t.Fatal("check failed")
 }
 
+func TestRetryCheckWithConditionalLogging(t *test.T) {
+	for range 3 { // want "retrying a check or test body"
+		if err := check(); err == nil {
+			return
+		}
+		if test.Verbose() {
+			t.Log("retrying")
+		}
+	}
+	t.Fatal("check failed")
+}
+
 func TestRetryHeader(t *test.T) {
 	for err := check(); err != nil; err = check() { // want "retrying a check or test body"
 		t.Log(err)

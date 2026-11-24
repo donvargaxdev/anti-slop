@@ -86,6 +86,9 @@ func (c flakeChecks) rememberOutcome(stmt *ast.AssignStmt) {
 func (c flakeChecks) retriesLoop(body *ast.BlockStmt) bool {
 	found := false
 	ast.Inspect(body, func(node ast.Node) bool {
+		if found {
+			return false
+		}
 		switch node := node.(type) {
 		case nil, *ast.FuncLit, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
 			return false
