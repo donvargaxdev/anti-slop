@@ -1,0 +1,162 @@
+@phase-1
+Feature: The command line
+  The rules every command of a project made from this template follows, held by the
+  built binary. The harness stamps the binary it builds with a known version and
+  commit, as a release's build is stamped with the release's, so a scenario can tell
+  a stamp from the dev version of a build without one. A usage failure is exit 80,
+  an unknown command exit 81, and each names what was wrong in words a person reads,
+  never kong's own such as "EOL". With --json the failure is one object on stdout and
+  nothing is printed on stderr.
+
+  @ID-CLI-01 @count-cli @binary-only
+  Scenario: --version prints the version stamped at build
+    When anti-slop runs with "--version"
+    Then it exits with code 0
+    And the first line of its standard output is "anti-slop" and the stamped version
+
+  @ID-CLI-02 @count-cli @binary-only
+  Scenario: version prints what --version prints
+    When anti-slop runs with "version"
+    Then it exits with code 0
+    And the first line of its standard output is "anti-slop" and the stamped version
+    And the second line of its standard output is "commit" and the stamped commit
+
+  # The commit is the one a release's build stamps, else the revision the go tool
+  # records for a build in a checkout, else there is none and no second line.
+  @ID-CLI-03 @count-cli @binary-only
+  Scenario: --version prints the build's commit on its second line
+    When anti-slop runs with "--version"
+    Then it exits with code 0
+    And the second line of its standard output is "commit" and the stamped commit
+
+  @ID-CLI-04 @count-cli
+  Scenario: an unknown command exits 81, naming it and the command meant
+    When anti-slop runs with "coun"
+    Then it exits with code 81
+    And its error output says "coun"
+    And its error output says "count"
+
+  @ID-CLI-05 @count-cli
+  Scenario: an unknown flag exits 80, naming it
+    Given the file "notes.txt" contains "one two"
+    When anti-slop runs with "count notes.txt --bogus"
+    Then it exits with code 80
+    And its error output says "--bogus"
+
+  # kong takes a switch given a value; the mappers and the hook on kong's parse
+  # refuse it in our words instead.
+  @ID-CLI-06 @count-cli
+  Scenario: a switch given a value exits 80, naming it
+    Given the file "notes.txt" contains "one two"
+    When anti-slop runs with "count notes.txt --json=yes"
+    Then it exits with code 80
+    And its error output says "--json"
+    And its error output does not say "EOL"
+
+  # Decision 1: a flag that is not cumulative is given once. A switch and its
+  # --no- pair count as one flag, so giving both is giving it twice; the
+  # environment variable is not the flag, and still takes a value beside it.
+  @ID-CLI-08 @T-14
+  Scenario: a switch given twice exits 80, naming it
+    Given the file "notes.txt" contains "one two"
+    When anti-slop runs with "count notes.txt --json --json"
+    Then it exits with code 80
+    And its JSON output names the problem "flags.repeated"
+    And its error output is empty
+    And its standard output does not say "words"
+
+  @ID-CLI-09 @T-14
+  Scenario: a switch with its --no- pair exits 80, naming it
+    Given the file "notes.txt" contains "one two"
+    When anti-slop runs with "count notes.txt --no-json --json"
+    Then it exits with code 80
+    And its JSON output names the problem "flags.repeated"
+    And its error output is empty
+    And its standard output does not say "words"
+
+  @ID-CLI-07 @count-cli
+  Scenario: version takes no argument and refuses one
+    When anti-slop runs with "version extra"
+    Then it exits with code 80
+    And its error output says "extra"
+
+  # A script reads the version as JSON, as it reads count's: one object on one
+  # line, schema 1, with the version and the commit the build was stamped with.
+  # A build that knows no commit leaves the commit key out, as its text has no
+  # second line; the harness always stamps one, so the unit tests show that.
+  @ID-CLI-10 @T-34 @binary-only
+  Scenario: version --json prints one object with the stamped version and commit
+    When anti-slop runs with "version --json"
+    Then it exits with code 0
+    And its JSON output gives the stamped version and commit
+    And its standard output is one line
+
+  # A shell that set the variable gets JSON from every command that has --json.
+  @ID-CLI-11 @T-34 @binary-only
+  Scenario: ANTI_SLOP_JSON turns version's JSON on
+    When anti-slop runs with "version" and the environment "ANTI_SLOP_JSON=1"
+    Then it exits with code 0
+    And its JSON output gives the stamped version and commit
+
+  # The variable is not the flag, so declining it on the command line is giving
+  # the switch once, and the text --version prints comes back.
+  @ID-CLI-12 @T-34 @binary-only
+  Scenario: --no-json declines the JSON the environment turns on for version
+    When anti-slop runs with "version --no-json" and the environment "ANTI_SLOP_JSON=1"
+    Then it exits with code 0
+    And the first line of its standard output is "anti-slop" and the stamped version
+    And the second line of its standard output is "commit" and the stamped commit
+
+  # As count's help does, version's names the shape of its --json object, so a
+  # script's author needs no source to read it.
+  @ID-CLI-13 @T-34
+  Scenario: version's help names its JSON shape
+    When anti-slop runs with "version --help"
+    Then it exits with code 0
+    And its standard output says "--json prints one object: schema 1, ok true, version, and commit when the build knows it."
+
+  # Decision 8: an interrupt cancels the command's context, so a command waiting on
+  # its input stops promptly, and it exits 130 on every system, saying so once. The
+  # step interrupts only once the binary waits on its input: os.Interrupt on Linux
+  # and macOS, CTRL_BREAK_EVENT to the binary's own process group on Windows, which
+  # Go reports as the same signal. The input is left open, so nothing but the
+  # interrupt can end the wait.
+  @ID-CLI-14 @cli-ctrl-c @binary-only
+  Scenario: an interrupt while count waits on standard input exits 130 and says so
+    When anti-slop runs with "count -" and its standard input left open
+    And it is interrupted while it waits
+    Then it exits with code 130
+    And its error output says "interrupted"
+    And its standard output is empty
+
+  # Under --json the interrupt is a failure like any other: one object, ok false,
+  # its problem's rule what a script matches on.
+  @ID-CLI-15 @cli-ctrl-c @binary-only
+  Scenario: an interrupt under --json prints the interrupted problem
+    When anti-slop runs with "count - --json" and its standard input left open
+    And it is interrupted while it waits
+    Then it exits with code 130
+    And its JSON output names the problem "interrupted"
+
+  # The problem names the command as it was written, in a key of its own beside the
+  # rule, so a script reads it without parsing a sentence, and the fix says the one
+  # meant. With --json nothing goes to stderr.
+  @ID-CLI-16 @count-cli
+  Scenario: an unknown command under --json exits 81 and names the command meant
+    When anti-slop runs with "coun --json"
+    Then it exits with code 81
+    And its JSON output names the problem "command.unknown"
+    And its JSON output gives the subject "command" as "coun"
+    And its standard output says "Did you mean 'count'?"
+    And its error output is empty
+
+  # A bad flag is a usage failure of its own rule, naming the flag as it was written
+  # in a key of its own.
+  @ID-CLI-17 @count-cli
+  Scenario: an unknown flag under --json exits 80 and names the flag
+    Given the file "notes.txt" contains "one two"
+    When anti-slop runs with "count notes.txt --bogus --json"
+    Then it exits with code 80
+    And its JSON output names the problem "flags.unknown"
+    And its JSON output gives the subject "flag" as "--bogus"
+    And its error output is empty

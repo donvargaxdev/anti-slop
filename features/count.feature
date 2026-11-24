@@ -1,0 +1,175 @@
+@phase-1
+Feature: Count
+  What a person of a project made from this template observes from
+  anti-slop count <file>: the logical lines and the Unicode-whitespace words the
+  Go foundation already counts, with - reading standard input and no implicit default
+  action. A human run prints the counts on stdout and the use-json hint on stderr, and
+  never the input's contents. --json prints one object, schema 1, with ok, file (the
+  argument as given, - for standard input), lines and words, and it prints the hint
+  nowhere. Every failure prints its own object, ok false, with problems carrying rule,
+  message and fix, and with --json nothing is printed on stderr. The exit code comes from
+  the kind of the error, in the count slice's classifier alone: 80 for a usage failure, 82
+  for an input that is missing (count.input-missing) or otherwise unreadable, a directory
+  included (count.input-unreadable). A kind no classifier claims is the 100 of an
+  unclassified bug, never a child status passed through, and count itself never refuses
+  with 1. No arguments and --help print help on stdout with exit 0, while count without
+  its file is a usage failure. --help and --version are actions; --json is a negatable switch with
+  ANTI_SLOP_JSON, the project's name in upper case. -- ends the options and flags
+  are accepted in any position.
+
+  # A file whose last line has no newline still counts, CRLF is one separator and
+  # punctuation stays inside a word, so the counts a person reads are the foundation's
+  # and not a second rule written in the UI.
+  @ID-COUNT-01 @count-cli
+  Scenario: count prints a file's lines and words and hints at --json
+    Given the file "notes.txt" contains "one two three", "four five"
+    When anti-slop runs with "count notes.txt"
+    Then it exits with code 0
+    And its standard output says "notes.txt: lines 2, words 5"
+    And its error output says "anti-slop: for scripts, use --json"
+
+  # The counts are for people, never the file's own text: an input holding a secret
+  # must not reach the output.
+  @ID-COUNT-02 @count-cli
+  Scenario: count never prints what it read
+    Given the file "secret.txt" contains "hunter2"
+    When anti-slop runs with "count secret.txt"
+    Then it exits with code 0
+    And its standard output does not say "hunter2"
+
+  @ID-COUNT-03 @count-cli
+  Scenario: count reads standard input where the argument is -
+    Given standard input holds "one two three"
+    When anti-slop runs with "count -"
+    Then it exits with code 0
+    And its standard output says "-: lines 1, words 3"
+
+  @ID-COUNT-04 @count-cli
+  Scenario: --json prints one object with the file, its lines and its words
+    Given the file "notes.txt" contains "one two three", "four five"
+    When anti-slop runs with "count notes.txt --json"
+    Then it exits with code 0
+    And its JSON output gives file "notes.txt", 2 lines and 5 words
+    And its error output does not say "--json"
+
+  # Standard input is named - in the object too, so a script needs no second rule to
+  # tell where the counts came from.
+  @ID-COUNT-05 @count-cli
+  Scenario: --json names standard input as the argument it was given
+    Given standard input holds "one two three"
+    When anti-slop runs with "count - --json"
+    Then it exits with code 0
+    And its JSON output gives file "-", 1 lines and 3 words
+
+  # A switch that can be declined, never --json [yes|no]. Its environment variable
+  # is not the flag, so declining it on the command line is giving it once.
+  @ID-COUNT-06 @count-cli
+  Scenario: --no-json declines the switch its environment variable turns on
+    Given the file "notes.txt" contains "one two three", "four five"
+    When anti-slop runs with "count notes.txt --no-json" and the environment "ANTI_SLOP_JSON=1"
+    Then it exits with code 0
+    And its standard output says "notes.txt: lines 2, words 5"
+
+  @ID-COUNT-07 @count-cli
+  Scenario: ANTI_SLOP_JSON turns the JSON on for a shell
+    Given the file "notes.txt" contains "one two three", "four five"
+    When anti-slop runs with "count notes.txt" and the environment "ANTI_SLOP_JSON=1"
+    Then it exits with code 0
+    And its JSON output gives file "notes.txt", 2 lines and 5 words
+
+  # -- ends the options and an option-argument is never read as a flag, so a file
+  # whose name starts with a dash is still counted. --json comes before the --,
+  # which ends the options: after it --json is a file's name, not a switch.
+  @ID-COUNT-08 @count-cli
+  Scenario: -- ends the options so a name starting with - is a file
+    Given the file "-draft.txt" contains "one two"
+    When anti-slop runs with "count --json -- -draft.txt"
+    Then it exits with code 0
+    And its JSON output gives file "-draft.txt", 1 lines and 2 words
+
+  # bufio.Scanner's default token is 64 KiB: a line past it must still be one line and
+  # be counted whole, or the answer would quietly depend on the length of a line.
+  @ID-COUNT-09 @count-cli
+  Scenario: a line longer than a scanner's token limit is counted whole
+    Given the file "long.txt" holds a line of 100000 characters
+    When anti-slop runs with "count long.txt --json"
+    Then it exits with code 0
+    And its JSON output gives file "long.txt", 1 lines and 1 words
+
+  # Exit 82 is the environment's, not a refusal: the input the person named is not
+  # there. The rule ID is what a script matches on, not the sentence.
+  @ID-COUNT-10 @count-cli
+  Scenario: a missing file exits 82 with count.input-missing
+    When anti-slop runs with "count absent.txt --json"
+    Then it exits with code 82
+    And its JSON output names the problem "count.input-missing"
+    And its JSON output gives the subject "file" as "absent.txt"
+
+  # A directory exists and still cannot be read as bytes; a platform says so
+  # differently, the kind and the code are the same.
+  @ID-COUNT-11 @count-cli
+  Scenario: a directory exits 82 with count.input-unreadable
+    Given an empty folder "adirectory"
+    When anti-slop runs with "count adirectory --json"
+    Then it exits with code 82
+    And its JSON output names the problem "count.input-unreadable"
+
+  # With --json even a failure is one object, and every problem says what to do next,
+  # not only what went wrong: a script reads the rule and prints the fix.
+  @ID-COUNT-12 @count-cli
+  Scenario: a JSON failure carries a rule, a message and a fix for each problem
+    When anti-slop runs with "count absent.txt --json"
+    Then it exits with code 82
+    And its JSON output gives each problem a rule, a message and a fix
+    And its JSON output gives the subject "file" as "absent.txt"
+    And its error output is empty
+
+  @ID-COUNT-13 @count-cli
+  Scenario: count without its file is a usage failure
+    When anti-slop runs with "count"
+    Then it exits with code 80
+    And its error output says "count"
+    And its error output does not say "EOL"
+
+  # No implicit default action: with nothing to do the program says what it can do,
+  # on stdout, and succeeds.
+  @ID-COUNT-14 @count-cli
+  Scenario: no arguments print the help on stdout and exit 0
+    When anti-slop runs with ""
+    Then it exits with code 0
+    And its standard output says "count"
+    And its standard output says "completion"
+    And its error output does not say "count"
+
+  # The help of a command gives the shape of its --json output and every exit code it
+  # can return, so the two agree without a reader holding the source. The wording below
+  # is what the help must hold, because a scenario checks it and a script reads it.
+  @ID-COUNT-15 @count-cli
+  Scenario: count's help names its JSON shape and its exit codes
+    When anti-slop runs with "count --help"
+    Then it exits with code 0
+    And its standard output says "--json prints one object: schema 1, ok true, file the argument, lines and words."
+    And its standard output says "Exit codes:"
+    And its standard output says "0  success"
+    And its standard output says "80  the command line is wrong"
+    And its standard output says "82  the input is missing or cannot be read"
+    And its standard output says "100  an error nothing classified, a bug"
+
+  # Decision 8 gives every command the exit code 130, so count's help lists it
+  # beside the codes count returns of its own.
+  @ID-COUNT-16 @cli-ctrl-c
+  Scenario: count's help names the interrupt's exit code
+    When anti-slop runs with "count --help"
+    Then it exits with code 0
+    And its standard output says "130  interrupted"
+
+  # The argument is checked where it enters, into a value the rest trusts: an empty
+  # one names no file, and it is refused as given, never repaired into standard input
+  # or the folder it might mean.
+  @ID-COUNT-17 @count-cli
+  Scenario: an empty file argument is refused as input no one can read
+    When anti-slop runs with "count '' --json"
+    Then it exits with code 80
+    And its JSON output names the problem "count.input-invalid"
+    And its JSON output gives the subject "file" as ""
+    And its error output is empty

@@ -1,0 +1,21 @@
+# The template render this project is kept up to date with, as
+# itos-template new made it or adopt linked it: the template, by a name
+# update can reach (an absolute path, a URL with no credential), the
+# release, when it was one, the stack, the features, the answers, and the
+# commit each of the template's branches was at. itos-template update reads
+# it; edit it only to change what an update renders: a path listed under
+# declined, a file or a folder and what is under it, no update brings.
+version: 1
+template: https://github.com/donvargax/go-template-itos
+release: v0.4.0
+stack: go
+features:
+  - cli
+answers:
+  module: github.com/donvargaxdev/anti-slop
+  name: anti-slop
+  owner: donvargaxdev
+commits:
+  go/cli: ebf4d93331c571fbbb711154da91d7fc5e1ec913
+  main: 04edbc99ec6425dce214a02d7c71c7c96898629d
+  stack/go: 9a8cb7f2b9341bcb436a87ee5e16332227b63caa

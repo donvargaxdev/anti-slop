@@ -1,0 +1,146 @@
+# Feature files
+
+Every `feat:` and `fix:` commit of this project is driven by scenarios in this folder.
+Nothing else belongs here. The harness is harvested from itos's
+(github.com/donvargax/itos, `features/`), itos-template's and itos-cc's two drivers, without
+any one's own generator behaviour.
+
+## Two drivers
+
+One set of feature files runs under two drivers (decision 14), sharing the steps in `steps.go`:
+
+- **In process**, the default: `cmd/anti-slop`'s `TestScenarios` calls `run` with buffers
+  for the UI and `porttest`'s fake for the `Files` port, the Given steps filling the fake. No
+  binary is built and no process starts, so a scenario takes milliseconds and `go test ./cmd/...`
+  runs them all.
+- **The built binary**: `TestFeatures` here builds the program and runs it with the real adapters,
+  which proves `main`'s wiring, the real disk, exit codes and signals. It runs only where
+  `ANTI_SLOP_FEATURES_BINARY_DRIVER=1` is set, which every CI job that runs the features
+  sets; anywhere else it logs that it ran nothing and passes.
+
+A fake may stand in for its adapter because both pass the port's one contract suite
+(`porttest.FilesContract`). `TestEveryPortIsBoundOnDiskAndInProcess` in `cmd` fails when a port is
+bound in one driver and not the other.
+
+A scenario only the binary can hold carries `@binary-only`, and the in-process driver leaves it
+out: the interrupts (`ID-CLI-14`, `ID-CLI-15`), which need a real process and a real signal, and
+the scenarios that read the stamped version and commit (`ID-CLI-01`, `02`, `03`, `10`, `11`,
+`12`), which need a build with `-ldflags -X`. A scenario is never copied for the other driver.
+
+## What goes in a feature file
+
+Only behaviour a user of the project can observe: what a command does to a folder, its exit
+code, and what it prints.
+
+Never here:
+
+- code structure, dead code, dependencies, formatting (`gofmt`, `go vet`, golangci-lint,
+  govulncheck);
+- refactors and performance budgets (tasks in `tasks/`);
+- internal logic (unit tests, next to the code).
+
+## Black-box boundary
+
+The steps (`steps.go`, Go, run by [godog](https://github.com/cucumber/godog)) treat the program as
+a black box, through a driver. The binary driver (`binary_test.go`) builds the program once a run
+from this tree (`anti-slop.exe` on
+Windows), stamped with a known version and commit, as a release's build is stamped with the
+release's. Each scenario gets a scratch folder in a temporary directory, runs the binary in it
+and reads its exit code, its output and the files it leaves. A step judges the program by its
+command line alone: it never reads its source or calls its code to decide a result.
+
+Commands run in a clean environment: no `GIT_*`, `ITOS_CC_*`, `ANTI_SLOP_*`, `GITHUB_*`,
+`GH_*` or `CI` variable of the caller's, no global or system git config, a fixed author, and the
+caller's PATH unchanged. A `GOCOVERDIR` that exists builds the
+binary with `-cover` and collects what each run did, for itos-cc to merge with `go test`'s.
+
+An interrupt is sent as each system delivers Ctrl-C, from one build-tagged file per system:
+`os.Interrupt` on Linux and macOS, and on Windows `CTRL_BREAK_EVENT` to the binary started in a
+process group of its own, which Go reports as the same signal. The step first writes more to the
+binary's open stdin than any pipe holds unread, so the write returns only once the binary is
+reading, its interrupt handling already in place; no sleep guesses when. A run the interrupt
+killed by the system's default action fails the step: it never handled the interrupt.
+
+## Running them
+
+```sh
+go test ./cmd/anti-slop -count=1 -run '^TestScenarios$'   # in process, every live scenario
+export ANTI_SLOP_FEATURES_BINARY_DRIVER=1                  # for the binary driver below
+go test ./features -count=1                          # every live scenario, through the binary
+go test ./features -count=1 -scenarios='^@ID-CLI-'   # the live scenarios with a matching tag
+go test ./features -count=1 -shard=1/3               # the first of three shares of them
+go test ./features -count=1 -timings=timings.txt     # where the run spent its time
+GOCOVERDIR=$d go test ./features -count=1            # built with -cover, its coverage in $d
+tools/bin/scenario-list                              # the live scenarios
+```
+
+`-scenarios`, `-shard=i/n` and `-timings=<file>` work under both drivers. A scenario belongs to
+the share its file, name and steps hash to, so every job agrees on the shares. `scenario-list`
+prints each live scenario's ID, file and drivers (`both`, or `binary`).
+
+`-scenarios` takes a regular expression over each tag, `@` included. It exists because godog's
+own tag filter takes exact tags joined by commas. One that matches no tag fails the run, so a selection never passes by
+running nothing. Each scenario is a subtest of `TestFeatures`, named after the scenario.
+
+## Tags
+
+| Tag               | Meaning                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------ |
+| `@phase-<n>`      | The phase a scenario belongs to.                                                     |
+| `@<item>`         | The work item that turns it green (`@count-cli`).                                     |
+| `@ID-<AREA>-<nn>` | Stable scenario ID. Never reuse or renumber them.           |
+| `@bug-<n>`        | Reproduces a fixed bug. Added by `fix:` commits.                                     |
+| `@wip`            | Written, not yet implemented. Excluded from every run, and a `feat` may not name it. |
+| `@binary-only`    | Only the binary driver can hold it. The in-process driver leaves it out.             |
+
+**IDs.** `<AREA>` is one word in capitals for the area of behaviour, and one feature file holds
+one area: `COUNT` is `count.feature`, `CLI` is `cli.feature`, `COMPL` is `completion.feature`.
+`<nn>` counts up within the area from `01`; a removed scenario's number is not given again. A new
+area gets a new word and a new file.
+
+## Commit rules
+
+- `feat:` adds or changes scenarios, or turns `@wip` ones green.
+- `fix:` adds a `@bug-<n>` scenario that failed before the fix, or turns an existing failing
+  scenario green.
+- Red first: a slice's steps go alone in a `test` commit, its scenarios still `@wip`.
+
+## Writing a scenario
+
+- **Give a check its own wording.** godog matches a step's text whatever its keyword, so a `Then`
+  phrased like an existing `Given` runs the setter and cannot fail.
+- **A step is one line**, however long.
+- **Assert what a user reads**: the exit code, a sentence of the output. Never more of the output
+  than the behaviour is about.
+- **Never start a description line with `@`.** Gherkin reads it as tags, and godog then refuses
+  the file, failing every run of the features.
+- **Say why beside the scenario** when a setup would make a reader ask: a comment above the tag
+  line.
+
+## The steps this project's scenarios use
+
+These are the ones the harness must define. Each is a regular expression over the step's text,
+with the program named as the built binary is.
+
+| Step                                                                                  | What it asserts                                                  |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `anti-slop runs with "…"`                                                       | Runs the binary in the scratch folder with those words.          |
+| `anti-slop runs with "…" and the environment "NAME=value"`                     | The same, with that variable added to the clean environment.     |
+| `anti-slop runs with "…" and its standard input left open`                     | Starts the binary, its stdin a pipe held open, and does not wait. |
+| `it is interrupted while it waits`                                                    | Interrupts that run once it reads its stdin; waits for it to stop. |
+| `it exits with code <n>`                                                              | The binary's exit status.                                         |
+| `its standard output says "…"` / `does not say "…"` / `lists "…"` / `does not list "…"` | Containment, or one whole line equal to the text.                |
+| `its standard output is empty`                                                        | Nothing at all on stdout.                                        |
+| `its error output says "…"` / `does not say "…"`                                      | The same, on stderr.                                              |
+| `the first line of its standard output is "…" and the stamped version`                | The stamped version the harness built with.                      |
+| `the second line of its standard output is "…" and the stamped commit`                | The stamped commit.                                               |
+| `the last line of its standard output is "…"`                                          | The completion protocol's instruction line.                       |
+| `its JSON output names the problem "…"`                                               | That the object lists a problem with that rule.                  |
+| `its JSON output gives file "…", <n> lines and <n> words`                             | The success object's file, lines and words.                      |
+| `its JSON output gives each problem a rule, a message and a fix`                      | That no problem is missing one of the three.                     |
+| `its JSON output gives the stamped version and commit`                                | version's object: schema 1, ok, the stamped version and commit.  |
+| `its standard output is one line`                                                     | Exactly one line, as `--json` prints its object.                 |
+| `the file "…" contains "…", "…"`                                                      | Each text is in the file.                                         |
+| `the file "…" holds a line of <n> characters`                                         | A file written for the scenario, long enough to beat a token limit. |
+| `standard input holds "…"`                                                            | The text the run reads from its standard input.                   |
+| `an empty folder "…"`                                                                 | A folder in the scratch directory.                                |

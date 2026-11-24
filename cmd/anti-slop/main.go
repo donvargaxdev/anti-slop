@@ -1,0 +1,182 @@
+// Command anti-slop counts the lines and words of a file or of
+// standard input. It runs alone, as anti-slop.
+//
+// kong declares the command line: the flags and commands are the fields of
+// commandLine, each switch with its --no- pair and its environment variable.
+// The main output goes to stdout; logs, structured, and errors go to stderr.
+//
+// main only assembles: the count command is a slice, its kong struct and its
+// handler in a package of its own (internal/count), and main makes the
+// context an interrupt cancels, gives the slice its adapters (internal/stdin, falling back on
+// internal/disk), parses the command line, runs the one it names through the
+// UI the slices share (internal/cli) and exits with the code that slice
+// returns. The UI imports nothing of ours: main hands it each slice's
+// classifier, which turns that slice's failures into problems. A usage error
+// or an unknown command, which kong finds before any slice runs, is the one
+// failure main reports itself, through that UI, as the problem
+// internal/cli's ParseProblem makes of kong's typed error; internal/cli's
+// Flags hold kong to the rules on flags it does not hold by itself.
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"os/signal"
+	"strings"
+
+	"github.com/donvargax/kong"
+	"golang.org/x/term"
+
+	"github.com/donvargaxdev/anti-slop/internal/cli"
+	"github.com/donvargaxdev/anti-slop/internal/engine/counting/disk"
+	"github.com/donvargaxdev/anti-slop/internal/engine/counting/port"
+	count "github.com/donvargaxdev/anti-slop/internal/slices/count/command"
+	"github.com/donvargaxdev/anti-slop/internal/slices/count/stdin"
+	"github.com/donvargaxdev/anti-slop/internal/version"
+)
+
+// programName is the name the command answers to. It sits outside run so that
+// run's body, which itos-cc.yaml's exception hashes, holds no project name a
+// render replaces.
+const programName = "anti-slop"
+
+// commandLine is the command line: its flags and commands.
+type commandLine struct {
+	// An action, not a switch: it prints and exits, so it has no --no- pair
+	// and no environment variable.
+	ShowVersion kong.VersionFlag `name:"version" help:"Print the version and the commit it was built from, and exit."`
+
+	Count      count.CLI      `cmd:"" help:"Count the lines and words of a file, or of standard input."`
+	Version    cli.Version    `cmd:"" help:"Print the version and the commit it was built from."`
+	Completion cli.Completion `cmd:"" help:"Print a shell completion script."`
+	Complete   struct{}       `cmd:"" name:"__complete" hidden:""`
+}
+
+// main makes the context every command's work runs under, and has
+// internal/cli's StopOnInterrupt cancel it on the first interrupt and end
+// the process with 130 on a second (decision 8). signal.Notify is the one
+// line that differs by system: os.Interrupt is SIGINT on Linux and macOS,
+// and Ctrl-C or Ctrl-Break at a Windows console. It is in place before the
+// command line is parsed, so no command reads its input before an
+// interrupt would reach it. The channel holds both interrupts, so a second
+// one is not lost while the first is handled.
+func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	interrupts := make(chan os.Signal, 2)
+	signal.Notify(interrupts, os.Interrupt)
+	go cli.StopOnInterrupt(interrupts, cancel, os.Exit)
+	os.Exit(run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, diskAdapters()))
+}
+
+// adapters is every port the commands read through, bound to the adapters
+// that serve it. diskAdapters binds the real ones for main; a test binds
+// porttest's fakes (scenarios_test.go), and TestEveryPortIsBoundOnDiskAndInProcess
+// holds both to every field, so a new port is bound in each before it passes.
+type adapters struct {
+	Files port.Files
+}
+
+// diskAdapters is every port bound to the real adapter.
+func diskAdapters() adapters { return adapters{Files: disk.Files{}} }
+
+// run parses args and runs what they name, returning the exit code. With no
+// arguments at all there is nothing to run and no implicit action to run in
+// its place, so the program says what it can do, on stdout, and succeeds.
+//
+// kong's own exit is taken over and becomes run's return: --help and
+// --version print and ask kong to stop, and a run that returns the code is
+// what main exits with, so a test can read what a run printed.
+//
+// ctx, the UI and each slice's handler are kong's bindings, so a command's
+// Run is handed them by type: the count command's handler reads through the
+// stdin adapter, which falls back on the files port a is given (the disk, in
+// main), so no adapter imports another.
+func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Writer, a adapters) int {
+	slog.SetDefault(logger(stderr))
+	ui := &cli.UI{In: in, Stdout: stdout, Stderr: stderr, Classifiers: []cli.Classifier{count.Classify}}
+	if len(args) == 0 {
+		args = []string{"--help"}
+	}
+	stopped := -1
+	var c commandLine
+	parser, err := kong.New(&c, append(cli.Flags(),
+		kong.Name(programName),
+		kong.Description("Count the lines and words of a file, or of standard input."),
+		kong.Writers(stdout, stderr),
+		kong.Exit(func(code int) { stopped = code }),
+		kong.Vars{"version": version.Text(programName)},
+		kong.BindTo(ctx, (*context.Context)(nil)),
+		kong.Bind(ui, count.Handler{Files: stdin.Files{Fallback: a.Files, In: in}}),
+	)...)
+	if err != nil {
+		// A model kong refuses is a bug, reported as one.
+		return ui.Fail(err, wantsJSON(args))
+	}
+	if len(args) > 0 && args[0] == "__complete" {
+		for _, line := range cli.Complete(parser.Model, args[1:]) {
+			_, _ = fmt.Fprintln(stdout, line)
+		}
+		return 0
+	}
+	parsed, err := parser.Parse(args)
+	if stopped >= 0 {
+		return stopped
+	}
+	if err != nil {
+		// With --json, the failure's object, and nothing on stderr.
+		return ui.Emit(wantsJSON(args), []*cli.Problem{cli.ParseProblem(err)})
+	}
+	switch command, _, _ := strings.Cut(parsed.Command(), " "); command {
+	case "count":
+		out, err := parsed.Call(c.Count.Run)
+		if err != nil {
+			// Run asks for something nothing bound: a bug.
+			return ui.Fail(err, c.Count.JSON)
+		}
+		return out[0].(int)
+	case "version":
+		// What --version prints, as kong prints it, or with --json the
+		// version and commit that text is made of.
+		return c.Version.Run(ui, parser.Model.Vars()["version"], version.Version(), version.Commit())
+	case "completion":
+		return c.Completion.Run(ui)
+	}
+	// A command kong took that has no case here: a bug.
+	return ui.Fail(fmt.Errorf("no case runs the command %q", parsed.Command()), wantsJSON(args))
+}
+
+// wantsJSON is whether args ask for --json before any --, as a command line
+// kong could not parse is read.
+func wantsJSON(args []string) bool {
+	json := false
+	for _, a := range args {
+		switch a {
+		case "--":
+			return json
+		case "--json", "--json=true":
+			json = true
+		case "--no-json", "--json=false":
+			json = false
+		}
+	}
+	return json
+}
+
+// logger writes structured logs to w: JSON when w is not a terminal, text
+// when it is, warnings and errors only, so a run is quiet by default.
+func logger(w io.Writer) *slog.Logger {
+	opts := &slog.HandlerOptions{Level: slog.LevelWarn}
+	if f, ok := w.(*os.File); ok {
+		if term.IsTerminal(int(f.Fd())) {
+			return slog.New(slog.NewTextHandler(w, opts))
+		}
+	}
+	return slog.New(slog.NewJSONHandler(w, opts))
+}
+
+// itos-cc mutation: 19 killed, 1 survived, 1 uncovered
+// survived: line 118 `>` → `>=` in run
+// end itos-cc mutation
