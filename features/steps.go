@@ -204,6 +204,9 @@ func Initialize(sc *godog.ScenarioContext, d Driver) {
 		}
 		return w.fileContains(name, texts...)
 	})
+	sc.Step(`^the file "([^"]*)" holds:$`, func(name string, doc *godog.DocString) error {
+		return w.d.Write(name, []byte(doc.Content+"\n"))
+	})
 	sc.Step(`^the file "([^"]*)" holds a line of (\d+) characters$`, w.fileHoldsLine)
 	sc.Step(`^standard input holds "([^"]*)"$`, func(text string) error {
 		w.stdin = text

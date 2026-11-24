@@ -10,7 +10,7 @@ Feature: Comments
   package exits 82, and one go list would take for a flag exits 80. The command loads
   packages through the go tool and the disk, so only the binary holds these scenarios.
 
-  @wip @ID-COMMENTS-01 @comments-rule @binary-only
+  @ID-COMMENTS-01 @comments-rule @binary-only
   Scenario: comments reports each comment no tool reads and exits 0
     Given the file "go.mod" holds:
       """
@@ -30,7 +30,7 @@ Feature: Comments
     And its standard output says "p.go:3:1: comments: "
     And its standard output is one line
 
-  @wip @ID-COMMENTS-02 @comments-rule @binary-only
+  @ID-COMMENTS-02 @comments-rule @binary-only
   Scenario: comments leaves the comments a tool reads and prints nothing
     Given the file "go.mod" holds:
       """
@@ -57,7 +57,7 @@ Feature: Comments
     And its standard output is empty
     And its error output is empty
 
-  @wip @ID-COMMENTS-03 @comments-rule @binary-only
+  @ID-COMMENTS-03 @comments-rule @binary-only
   Scenario: comments exits 82 for a pattern that matches no package
     Given the file "go.mod" holds:
       """
@@ -70,13 +70,13 @@ Feature: Comments
     And its standard output is empty
     And its error output says "anti-slop: the packages cannot be loaded"
 
-  @wip @ID-COMMENTS-04 @comments-rule
+  @ID-COMMENTS-04 @comments-rule
   Scenario: comments exits 80 for a pattern that go list would take for a flag
     When anti-slop runs with "comments -- -x"
     Then it exits with code 80
     And its error output says "-x"
 
-  @wip @ID-COMMENTS-05 @comments-rule
+  @ID-COMMENTS-05 @comments-rule
   Scenario: comments without a package is a usage failure
     When anti-slop runs with "comments"
     Then it exits with code 80

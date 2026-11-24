@@ -136,6 +136,12 @@ func allowed(from, to role, target string, test bool) bool {
 	case "release":
 		return to.kind == "release"
 	}
+	if from.kind == "rule" {
+		return to.kind == "rule" && from.owner == to.owner
+	}
+	if to.kind == "rule" {
+		return from.kind == "adapter"
+	}
 	if !isSlice(from) && !isEngine(from) {
 		return from.kind == "support" && from.owner == to.owner
 	}
