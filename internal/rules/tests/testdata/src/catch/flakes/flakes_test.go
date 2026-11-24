@@ -48,6 +48,16 @@ func TestRetryWithCollectionSizedRange(t *test.T) {
 	t.Fatal("check failed")
 }
 
+func TestRetryWithCollectionRange(t *test.T) {
+	backoffs := []int{1, 2, 3}
+	for range backoffs { // want "retrying a check or test body"
+		if err := check(); err == nil {
+			return
+		}
+	}
+	t.Fatal("check failed")
+}
+
 func TestRetryHeader(t *test.T) {
 	for err := check(); err != nil; err = check() { // want "retrying a check or test body"
 		t.Log(err)

@@ -36,6 +36,11 @@ func TestCases(t *testing.T) {
 			t.Log("case failed")
 		}
 	}
+	for _, name := range cases {
+		if !t.Run(name, func(t *testing.T) {}) {
+			t.Log("case failed")
+		}
+	}
 }
 
 func TestNumericCases(t *testing.T) {

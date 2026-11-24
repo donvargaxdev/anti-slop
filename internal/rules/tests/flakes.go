@@ -32,8 +32,7 @@ func runFlakes(pass *analysis.Pass) (any, error) {
 				report(pass, stmt, "retrying a check or test body")
 			}
 		case *ast.RangeStmt:
-			if kind, ok := info.TypeOf(stmt.X).Underlying().(*types.Basic); ok &&
-				kind.Info()&types.IsInteger != 0 && checks.retriesLoop(stmt.Body) {
+			if checks.retriesLoop(stmt.Body) {
 				report(pass, stmt, "retrying a check or test body")
 			}
 		case *ast.AssignStmt:
