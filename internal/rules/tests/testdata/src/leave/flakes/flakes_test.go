@@ -107,6 +107,19 @@ func TestChecksWithoutRetryExits(t *testing.T) {
 	}
 }
 
+func TestStopOnStoredFailure(t *testing.T) {
+	outcome := t.Run("setup", func(t *testing.T) {})
+	for i := range 3 {
+		if outcome {
+			t.Skip("setup passed")
+		}
+		outcome = !t.Run(strconv.Itoa(i), func(t *testing.T) {})
+		if outcome {
+			break
+		}
+	}
+}
+
 func available() bool { return true }
 
 func retry(body any) {}

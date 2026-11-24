@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -61,7 +62,7 @@ func runFlakes(pass *analysis.Pass) (any, error) {
 }
 
 // rememberOutcome follows simple assignments of testing status to a local
-// variable, so storing t.Run or t.Failed does not hide a failure-dependent skip.
+// variable so retry and skip checks can use the stored result's polarity.
 func (c flakeChecks) rememberOutcome(stmt *ast.AssignStmt) {
 	for i, lhs := range stmt.Lhs {
 		ident, ok := lhs.(*ast.Ident)
@@ -84,17 +85,25 @@ func (c flakeChecks) rememberOutcome(stmt *ast.AssignStmt) {
 }
 
 func (c flakeChecks) retriesLoop(body *ast.BlockStmt) bool {
+	// The main traversal still needs the state from before entering the loop.
+	c.outcomes = maps.Clone(c.outcomes)
 	found := false
-	ast.Inspect(body, func(node ast.Node) bool {
+	ast.PreorderStack(body, nil, func(node ast.Node, parents []ast.Node) bool {
 		if found {
 			return false
 		}
 		switch node := node.(type) {
-		case nil, *ast.FuncLit, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+		case *ast.FuncLit, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
 			return false
-		case *ast.IfStmt:
-			found = exitsAttempt(c.failureBranch(node, false, body), false) ||
-				exitsAttempt(c.failureBranch(node, true, body), true)
+		case *ast.AssignStmt:
+			c.rememberOutcome(node)
+		}
+		// Inspect an if at its condition so its initializer has already been visited.
+		if len(parents) > 0 {
+			if stmt, ok := parents[len(parents)-1].(*ast.IfStmt); ok && node == stmt.Cond {
+				found = exitsAttempt(c.failureBranch(stmt, false, body), false) ||
+					exitsAttempt(c.failureBranch(stmt, true, body), true)
+			}
 		}
 		return !found
 	})
