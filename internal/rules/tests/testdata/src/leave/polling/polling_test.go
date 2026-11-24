@@ -60,6 +60,54 @@ func TestClosureDoesNotReadClockInCondition(t *testing.T) {
 
 func condition(func() time.Time) bool { return false }
 
+func TestDeadlineReassignedToReady(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Millisecond)
+	<-ch
+	ch = ready
+	for range 3 {
+		<-ch
+	}
+}
+
+func TestDeadlineAssignedAfterLoop(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := (<-chan time.Time)(ready)
+	for range 3 {
+		<-ch
+	}
+	ch = time.After(time.Millisecond)
+	<-ch
+}
+
+func TestDeadlineReassignedBeforeReceive(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Millisecond)
+	for range 3 {
+		ch = ready
+		<-ch
+	}
+}
+
+func TestDeadlineReassignedOnBothBranches(t *testing.T) {
+	ready := make(chan time.Time)
+	other := make(chan time.Time)
+	close(ready)
+	close(other)
+	ch := time.After(time.Millisecond)
+	if t.Name() == "use readiness channel" {
+		ch = ready
+	} else {
+		ch = other
+	}
+	for range 3 {
+		<-ch
+	}
+}
+
 func TestTimingDoesNotExitLoop(t *testing.T) {
 	start := time.Now()
 	for range 3 {

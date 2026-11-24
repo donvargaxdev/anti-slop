@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
 
 	"golang.org/x/tools/go/analysis"
 )
@@ -16,25 +17,7 @@ var Polling = &analysis.Analyzer{
 
 func runPolling(pass *analysis.Pass) (any, error) {
 	info := pass.TypesInfo
-	deadlines := make(map[types.Object]bool)
-	visitTests(pass, func(node ast.Node) {
-		switch stmt := node.(type) {
-		case *ast.AssignStmt:
-			for i, value := range stmt.Rhs {
-				if len(stmt.Lhs) == len(stmt.Rhs) && afterDeadline(info, value, deadlines) {
-					if ident, ok := stmt.Lhs[i].(*ast.Ident); ok {
-						deadlines[info.ObjectOf(ident)] = true
-					}
-				}
-			}
-		case *ast.ValueSpec:
-			for i, value := range stmt.Values {
-				if len(stmt.Names) == len(stmt.Values) && afterDeadline(info, value, deadlines) {
-					deadlines[info.ObjectOf(stmt.Names[i])] = true
-				}
-			}
-		}
-	})
+	receives := deadlineReceives(pass)
 	visitTests(pass, func(node ast.Node) {
 		var condition ast.Expr
 		var body *ast.BlockStmt
@@ -46,11 +29,136 @@ func runPolling(pass *analysis.Pass) (any, error) {
 		default:
 			return
 		}
-		if readsClock(info, condition) || pollsInBody(info, body, deadlines) {
+		if readsClock(info, condition) || pollsInBody(info, body, receives) {
 			report(pass, node, "polling against the wall clock")
 		}
 	})
 	return nil, nil
+}
+
+type deadlineScan struct {
+	info     *types.Info
+	channels map[types.Object]bool
+	receives map[*ast.UnaryExpr]bool
+}
+
+func deadlineReceives(pass *analysis.Pass) map[*ast.UnaryExpr]bool {
+	scan := deadlineScan{
+		info:     pass.TypesInfo,
+		channels: make(map[types.Object]bool),
+		receives: make(map[*ast.UnaryExpr]bool),
+	}
+	visitTestFiles(pass, func(file *ast.File) {
+		for _, decl := range file.Decls {
+			if vars, ok := decl.(*ast.GenDecl); ok && vars.Tok == token.VAR {
+				scan.record(vars)
+			}
+		}
+	})
+	visitTestFiles(pass, func(file *ast.File) {
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Body != nil {
+				scan.fork().record(fn.Body)
+			}
+		}
+	})
+	return scan.receives
+}
+
+func (scan deadlineScan) fork() deadlineScan {
+	scan.channels = maps.Clone(scan.channels)
+	return scan
+}
+
+func (scan deadlineScan) record(root ast.Node) {
+	if root == nil {
+		return
+	}
+	ast.Inspect(root, scan.visit)
+}
+
+func (scan deadlineScan) visit(node ast.Node) bool {
+	switch expr := node.(type) {
+	case *ast.FuncLit:
+		scan.fork().record(expr.Body)
+	case *ast.IfStmt:
+		scan.record(expr.Init)
+		scan.record(expr.Cond)
+		other := scan.fork()
+		scan.record(expr.Body)
+		other.record(expr.Else)
+		maps.Copy(scan.channels, other.channels)
+	case *ast.ForStmt:
+		scan.record(expr.Init)
+		scan.recordLoop(expr.Cond, expr.Body, expr.Post)
+	case *ast.RangeStmt:
+		scan.record(expr.X)
+		scan.recordLoop(expr.Key, expr.Value, expr.Body)
+	case *ast.AssignStmt:
+		scan.recordAssignment(expr)
+	case *ast.ValueSpec:
+		values := scan.values(expr.Values, len(expr.Names))
+		for i, name := range expr.Names {
+			scan.store(name, values[i])
+		}
+	case *ast.UnaryExpr:
+		if expr.Op == token.ARROW && afterDeadline(scan.info, expr.X, scan.channels) {
+			scan.receives[expr] = true
+		}
+		return true
+	default:
+		return true
+	}
+	return false
+}
+
+func (scan deadlineScan) recordLoop(parts ...ast.Node) {
+	entry := scan.fork()
+	for {
+		for _, part := range parts {
+			scan.record(part)
+		}
+		// A deadline assigned on one iteration can reach a receive on the next.
+		previous := len(entry.channels)
+		maps.Copy(entry.channels, scan.channels)
+		if len(entry.channels) == previous {
+			return
+		}
+		maps.Copy(scan.channels, entry.channels)
+	}
+}
+
+func (scan deadlineScan) recordAssignment(stmt *ast.AssignStmt) {
+	for _, lhs := range stmt.Lhs {
+		scan.record(lhs)
+	}
+	values := scan.values(stmt.Rhs, len(stmt.Lhs))
+	for i, lhs := range stmt.Lhs {
+		if name, ok := ast.Unparen(lhs).(*ast.Ident); ok {
+			scan.store(name, values[i])
+		}
+	}
+}
+
+// Evaluate the right-hand sides before replacing any of the assigned values.
+func (scan deadlineScan) values(exprs []ast.Expr, count int) []bool {
+	values := make([]bool, count)
+	for i, expr := range exprs {
+		scan.record(expr)
+		if len(exprs) == count {
+			values[i] = afterDeadline(scan.info, expr, scan.channels)
+		}
+	}
+	return values
+}
+
+func (scan deadlineScan) store(name *ast.Ident, deadline bool) {
+	object := scan.info.ObjectOf(name)
+	if deadline {
+		scan.channels[object] = true
+	} else {
+		delete(scan.channels, object)
+	}
 }
 
 func readsClock(info *types.Info, condition ast.Expr) bool {
@@ -73,7 +181,7 @@ func afterDeadline(info *types.Info, expr ast.Expr, deadlines map[types.Object]b
 	return false
 }
 
-func pollsInBody(info *types.Info, body *ast.BlockStmt, deadlines map[types.Object]bool) bool {
+func pollsInBody(info *types.Info, body *ast.BlockStmt, receives map[*ast.UnaryExpr]bool) bool {
 	found := false
 	ast.PreorderStack(body, nil, func(node ast.Node, parents []ast.Node) bool {
 		if found {
@@ -83,7 +191,7 @@ func pollsInBody(info *types.Info, body *ast.BlockStmt, deadlines map[types.Obje
 		case *ast.ForStmt, *ast.RangeStmt, *ast.FuncLit:
 			return false
 		case *ast.UnaryExpr:
-			found = expr.Op == token.ARROW && afterDeadline(info, expr.X, deadlines)
+			found = receives[expr]
 		case *ast.ReturnStmt:
 			found = guardedByClock(info, parents)
 		case *ast.BranchStmt:

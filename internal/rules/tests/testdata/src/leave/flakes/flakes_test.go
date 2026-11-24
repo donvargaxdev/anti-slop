@@ -32,7 +32,9 @@ func TestCases(t *testing.T) {
 		t.Run(cases[i], func(t *testing.T) {})
 	}
 	for i := range len(cases) {
-		t.Run(cases[i], func(t *testing.T) {})
+		if !t.Run(cases[i], func(t *testing.T) {}) {
+			t.Log("case failed")
+		}
 	}
 }
 

@@ -27,12 +27,12 @@ func runFlakes(pass *analysis.Pass) (any, error) {
 	visitTests(pass, func(node ast.Node) {
 		switch stmt := node.(type) {
 		case *ast.ForStmt:
-			if checks.retriesInHeader(stmt) || !collectionLength(info, stmt.Cond) && checks.retriesLoop(stmt.Body) {
+			if checks.retriesInHeader(stmt) || checks.retriesLoop(stmt.Body) {
 				report(pass, stmt, "retrying a check or test body")
 			}
 		case *ast.RangeStmt:
 			if kind, ok := info.TypeOf(stmt.X).Underlying().(*types.Basic); ok &&
-				kind.Info()&types.IsInteger != 0 && !collectionLength(info, stmt.X) && checks.retriesLoop(stmt.Body) {
+				kind.Info()&types.IsInteger != 0 && checks.retriesLoop(stmt.Body) {
 				report(pass, stmt, "retrying a check or test body")
 			}
 		case *ast.AssignStmt:
@@ -109,17 +109,6 @@ func (c flakeChecks) retriesInHeader(loop *ast.ForStmt) bool {
 		return c.failureCondition(loop.Cond, true, post)
 	}
 	return false
-}
-
-func collectionLength(info *types.Info, expr ast.Expr) bool {
-	return expr != nil && contains(expr, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
-			return false
-		}
-		ident, ok := ast.Unparen(call.Fun).(*ast.Ident)
-		return ok && info.Uses[ident] == types.Universe.Lookup("len")
-	})
 }
 
 func (c flakeChecks) failureBranch(stmt *ast.IfStmt, failure bool, attempt ast.Node) ast.Stmt {

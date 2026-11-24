@@ -39,12 +39,18 @@ var Environment = &analysis.Analyzer{
 }
 
 func visitTests(pass *analysis.Pass, visit func(ast.Node)) {
+	visitTestFiles(pass, func(file *ast.File) {
+		ast.Inspect(file, func(node ast.Node) bool {
+			visit(node)
+			return true
+		})
+	})
+}
+
+func visitTestFiles(pass *analysis.Pass, visit func(*ast.File)) {
 	for _, file := range pass.Files {
 		if strings.HasSuffix(pass.Fset.PositionFor(file.Pos(), false).Filename, "_test.go") {
-			ast.Inspect(file, func(node ast.Node) bool {
-				visit(node)
-				return true
-			})
+			visit(file)
 		}
 	}
 }

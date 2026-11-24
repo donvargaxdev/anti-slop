@@ -35,6 +35,45 @@ func TestPollWithDeadline(t *testing.T) {
 	}
 }
 
+func TestDeadlineAssignedDuringLoop(t *testing.T) {
+	var ch <-chan Time
+	for range 3 { // want "polling against the wall clock"
+		ch = After(Millisecond)
+		<-ch
+	}
+}
+
+func TestReceiveBeforeParallelReassignment(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	ch := After(Millisecond)
+	for range 3 { // want "polling against the wall clock"
+		ch, _ = ready, <-ch
+	}
+}
+
+func TestDeadlineOnOneBranch(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	ch := After(Millisecond)
+	if t.Name() == "use readiness channel" {
+		ch = ready
+	}
+	for range 3 { // want "polling against the wall clock"
+		<-ch
+	}
+}
+
+func TestDeadlineAssignedForNextIteration(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	ch := (<-chan Time)(ready)
+	for range 3 { // want "polling against the wall clock"
+		<-ch
+		ch = After(Millisecond)
+	}
+}
+
 func TestPollUntilBreak(t *testing.T) {
 	start := Now()
 	for { // want "polling against the wall clock"
