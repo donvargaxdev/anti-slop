@@ -212,6 +212,19 @@ linters:
           allow:
             - "$gostd"
             - "golang.org/x/tools/go/analysis$"
+          deny:
+            - pkg: "os"
+              desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
+            - pkg: "net"
+              desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
+            - pkg: "syscall"
+              desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
+            - pkg: "io/ioutil$"
+              desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
+            - pkg: "path/filepath$"
+              desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
+            - pkg: "plugin$"
+              desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
         rule-tests:
           list-mode: strict
           files:

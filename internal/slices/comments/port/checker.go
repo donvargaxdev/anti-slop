@@ -4,10 +4,10 @@
 package port
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // Finding is one comment the rule refuses, at the place it starts. Line and
@@ -61,7 +61,16 @@ type Checker interface {
 func Merge(a, b []Finding) []Finding {
 	all := slices.Concat(a, b)
 	slices.SortFunc(all, func(x, y Finding) int {
-		return cmp.Or(cmp.Compare(x.Path, y.Path), cmp.Compare(x.Line, y.Line), cmp.Compare(x.Col, y.Col), cmp.Compare(x.Reason, y.Reason))
+		if order := strings.Compare(x.Path, y.Path); order != 0 {
+			return order
+		}
+		if order := x.Line - y.Line; order != 0 {
+			return order
+		}
+		if order := x.Col - y.Col; order != 0 {
+			return order
+		}
+		return strings.Compare(x.Reason, y.Reason)
 	})
 	return slices.Compact(all)
 }
