@@ -107,3 +107,19 @@ func TestHelpGivesEveryExitCodeTheCommandReturns(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyGivesACancelledCheckTheInterruptedProblem(t *testing.T) {
+	problems, ok := command.Classify(&port.Cancelled{})
+	if !ok || len(problems) != 1 || problems[0].Code != cli.Interrupted().Code {
+		t.Errorf("Classify(cancelled) = %v, %v, want the interrupted problem", problems, ok)
+	}
+}
+
+type foreignFailure struct{ *port.Failed }
+
+func TestClassifyTakesAFailureItDoesNotKnowForABug(t *testing.T) {
+	problems, ok := command.Classify(foreignFailure{&port.Failed{Reason: "x"}})
+	if !ok || len(problems) != 1 || problems[0].Code != cli.Internal(errors.New("x")).Code {
+		t.Errorf("Classify(foreign) = %v, %v, want the internal problem", problems, ok)
+	}
+}

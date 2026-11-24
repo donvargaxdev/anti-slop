@@ -42,12 +42,18 @@ var Analyzer = &analysis.Analyzer{
 var nolintLinters = regexp.MustCompile(`^//nolint:[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*(\s.*)?$`)
 
 func run(pass *analysis.Pass) (any, error) {
-	for _, file := range pass.Files {
+	Report(pass.Files, pass.Report)
+	return nil, nil
+}
+
+// Report gives each finding of the rule in files to report, in the order of
+// the files and of each file's comments.
+func Report(files []*ast.File, report func(analysis.Diagnostic)) {
+	for _, file := range files {
 		for _, d := range findings(file) {
-			pass.Report(d)
+			report(d)
 		}
 	}
-	return nil, nil
 }
 
 func findings(file *ast.File) []analysis.Diagnostic {

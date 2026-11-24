@@ -5,15 +5,6 @@
 # a reason that stops holding cannot outlive the code it was written for.
 mutation:
   exceptions:
-    - file: cmd/anti-slop/main.go
-      function: github.com/donvargaxdev/anti-slop/cmd/anti-slop#run
-      hash: 525fa5930f26ac2d
-      line_in_function: 22
-      column: 15
-      original: '>'
-      replacement: '>='
-      reason: run replaces an empty line with --help before this comparison, so len(args) is never 0 here and > and >= both hold.
-      line_text: if len(args) > 0 && args[0] == "__complete" {
     - file: internal/release/build.go
       function: github.com/donvargaxdev/anti-slop/internal/release#extract
       hash: eb830c4ae00e4903

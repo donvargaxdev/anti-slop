@@ -44,30 +44,19 @@ func (c Checker) Check(ctx context.Context, patterns []string) ([]port.Finding, 
 	if len(pkgs) == 0 {
 		return nil, &port.Failed{Reason: "the patterns match no package"}
 	}
-	root, err := filepath.Abs(c.Dir)
-	if err != nil {
-		return nil, &port.Failed{Reason: err.Error()}
-	}
+	root, _ := filepath.Abs(c.Dir)
 	var found []port.Finding
 	for _, pkg := range pkgs {
 		if len(pkg.Errors) > 0 {
 			return nil, &port.Failed{Reason: pkg.Errors[0].Error()}
 		}
 		var reported []port.Finding
-		pass := &analysis.Pass{
-			Analyzer: comments.Analyzer,
-			Fset:     fset,
-			Files:    pkg.Syntax,
-			Report: func(d analysis.Diagnostic) {
-				at := fset.Position(d.Pos)
-				reported = append(reported, port.Finding{
-					Path: relative(root, at.Filename), Line: at.Line, Col: at.Column, Rule: d.Category, Reason: d.Message,
-				})
-			},
-		}
-		if _, err := comments.Analyzer.Run(pass); err != nil {
-			return nil, &port.Failed{Reason: err.Error()}
-		}
+		comments.Report(pkg.Syntax, func(d analysis.Diagnostic) {
+			at := fset.Position(d.Pos)
+			reported = append(reported, port.Finding{
+				Path: relative(root, at.Filename), Line: at.Line, Col: at.Column, Rule: d.Category, Reason: d.Message,
+			})
+		})
 		found = port.Merge(found, reported)
 	}
 	return found, nil

@@ -93,3 +93,20 @@ func TestAPatternThatMatchesNoPackageIsFailed(t *testing.T) {
 		t.Errorf("Check = %v, %v, want *port.Failed and no findings", got, failure)
 	}
 }
+
+func TestAFolderThatDoesNotExistIsFailed(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	got, failure := loader.Checker{Dir: missing}.Check(t.Context(), []string{"./..."})
+	if _, ok := failure.(*port.Failed); !ok || got != nil {
+		t.Errorf("Check = %v, %v, want *port.Failed and no findings", got, failure)
+	}
+}
+
+func TestAModuleWithNoPackageIsFailed(t *testing.T) {
+	dir := module(t, map[string]string{})
+	got, failure := loader.Checker{Dir: dir}.Check(t.Context(), []string{"./..."})
+	failed, ok := failure.(*port.Failed)
+	if !ok || got != nil || failed.Reason != "the patterns match no package" {
+		t.Errorf("Check = %v, %v, want *port.Failed saying the patterns match no package", got, failure)
+	}
+}

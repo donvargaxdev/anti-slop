@@ -116,13 +116,13 @@ func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Wri
 		kong.Exit(func(code int) { stopped = code }),
 		kong.Vars{"version": version.Text(programName)},
 		kong.BindTo(ctx, (*context.Context)(nil)),
-		kong.Bind(ui, count.Handler{Files: stdin.Files{Fallback: a.Files, In: in}}, comments.Handler{Checker: a.Comments}),
+		kong.Bind(ui, count.Handler{Files: stdin.Files{Fallback: a.Files, In: in}}),
 	)...)
 	if err != nil {
 		// A model kong refuses is a bug, reported as one.
 		return ui.Fail(err, wantsJSON(args))
 	}
-	if len(args) > 0 && args[0] == "__complete" {
+	if args[0] == "__complete" {
 		for _, line := range cli.Complete(parser.Model, args[1:]) {
 			_, _ = fmt.Fprintln(stdout, line)
 		}
@@ -145,12 +145,7 @@ func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Wri
 		}
 		return out[0].(int)
 	case "comments":
-		out, err := parsed.Call(c.Comments.Run)
-		if err != nil {
-			// Run asks for something nothing bound: a bug.
-			return ui.Fail(err, false)
-		}
-		return out[0].(int)
+		return c.Comments.Run(ctx, ui, comments.Handler{Checker: a.Comments})
 	case "version":
 		// What --version prints, as kong prints it, or with --json the
 		// version and commit that text is made of.
