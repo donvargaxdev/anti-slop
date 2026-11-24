@@ -3,7 +3,7 @@ Feature: Test reliability
   anti-slop tests reports sleeps, wall-clock polling, process environment changes and
   flake masking in Go test files. Findings go to stdout and leave the exit code at 0.
 
-  @wip @ID-TESTS-01 @issue-3 @binary-only
+  @ID-TESTS-01 @issue-3 @binary-only
   Scenario: tests reports each kind of finding and exits 0
     Given the file "go.mod" holds:
       """
@@ -54,7 +54,7 @@ Feature: Test reliability
       """
     And its error output is empty
 
-  @wip @ID-TESTS-02 @issue-3 @binary-only
+  @ID-TESTS-02 @issue-3 @binary-only
   Scenario: tests prints nothing for a test that uses cleanup and synchronization
     Given the file "go.mod" holds:
       """
@@ -87,19 +87,19 @@ Feature: Test reliability
     And its standard output is empty
     And its error output is empty
 
-  @wip @ID-TESTS-03 @issue-3
+  @ID-TESTS-03 @issue-3
   Scenario: tests requires a package pattern
     When anti-slop runs with "tests"
     Then it exits with code 80
     And its error output says "no package is named"
 
-  @wip @ID-TESTS-04 @issue-3
+  @ID-TESTS-04 @issue-3
   Scenario: tests refuses a pattern that go list would take for a flag
     When anti-slop runs with "tests -- -x"
     Then it exits with code 80
     And its error output says "-x"
 
-  @wip @ID-TESTS-05 @issue-3 @binary-only
+  @ID-TESTS-05 @issue-3 @binary-only
   Scenario: tests reports when a pattern matches no package
     Given the file "go.mod" holds:
       """

@@ -31,13 +31,15 @@ import (
 	"golang.org/x/term"
 
 	"github.com/donvargaxdev/anti-slop/internal/cli"
+	checkport "github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/disk"
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/port"
 	comments "github.com/donvargaxdev/anti-slop/internal/slices/comments/command"
 	commentsloader "github.com/donvargaxdev/anti-slop/internal/slices/comments/loader"
-	commentsport "github.com/donvargaxdev/anti-slop/internal/slices/comments/port"
 	count "github.com/donvargaxdev/anti-slop/internal/slices/count/command"
 	"github.com/donvargaxdev/anti-slop/internal/slices/count/stdin"
+	tests "github.com/donvargaxdev/anti-slop/internal/slices/tests/command"
+	testsloader "github.com/donvargaxdev/anti-slop/internal/slices/tests/loader"
 	"github.com/donvargaxdev/anti-slop/internal/version"
 )
 
@@ -54,6 +56,7 @@ type commandLine struct {
 
 	Count      count.CLI      `cmd:"" help:"Count the lines and words of a file, or of standard input."`
 	Comments   comments.CLI   `cmd:"" help:"Report the Go comments that no tool reads."`
+	Tests      tests.CLI      `cmd:"" help:"Report patterns that make Go tests unreliable."`
 	Version    cli.Version    `cmd:"" help:"Print the version and the commit it was built from."`
 	Completion cli.Completion `cmd:"" help:"Print a shell completion script."`
 	Complete   struct{}       `cmd:"" name:"__complete" hidden:""`
@@ -81,12 +84,13 @@ func main() {
 // holds both to every field, so a new port is bound in each before it passes.
 type adapters struct {
 	Files    port.Files
-	Comments commentsport.Checker
+	Comments checkport.Checker
+	Tests    checkport.Checker
 }
 
 // diskAdapters is every port bound to the real adapter.
 func diskAdapters() adapters {
-	return adapters{Files: disk.Files{}, Comments: commentsloader.Checker{}}
+	return adapters{Files: disk.Files{}, Comments: commentsloader.Checker{}, Tests: testsloader.Checker{}}
 }
 
 // run parses args and runs what they name, returning the exit code. With no
@@ -146,6 +150,9 @@ func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Wri
 		return out[0].(int)
 	case "comments":
 		return c.Comments.Run(ctx, ui, comments.Handler{Checker: a.Comments})
+	case "tests":
+		ui.Classifiers = []cli.Classifier{tests.Classify}
+		return c.Tests.Run(ctx, ui, a.Tests)
 	case "version":
 		// What --version prints, as kong prints it, or with --json the
 		// version and commit that text is made of.

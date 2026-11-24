@@ -161,6 +161,12 @@ func Initialize(sc *godog.ScenarioContext, d Driver) {
 		}
 		return nil
 	})
+	sc.Step(`^its standard output is:$`, func(doc *godog.DocString) error {
+		if want := doc.Content + "\n"; w.result.Stdout != want {
+			return fmt.Errorf("standard output is %q, want %q\n%s", w.result.Stdout, want, w.report())
+		}
+		return nil
+	})
 	sc.Step(`^its error output is empty$`, func() error {
 		if w.result.Stderr != "" {
 			return fmt.Errorf("error output is not empty\n%s", w.report())

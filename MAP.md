@@ -49,7 +49,17 @@ test command. Add an entry for each slice or domain; say where to look, not what
 - Start: `internal/rules/comments/comments.go`, the `go/analysis` pass; fixtures: `testdata/src/catch`
   (must catch) and `testdata/src/leave` (must leave), run by `comments_test.go`.
 - Slice: `internal/slices/comments/command` (the `comments` command, its `Patterns` and `Classify`),
-  `port` (`Checker` and its failures), `loader` (the adapter: go list, then the rule), `port/porttest`
-  (the fake and `CheckerContract`, which the fake and the loader both pass).
+  `loader` (the adapter that loads packages and runs the rule).
+- Shared port: `internal/engine/checking/port` (`Checker`, package patterns and failures),
+  with the fake and `CheckerContract` in `port/porttest`.
 - Scenarios: `features/comments.feature`; the ones that load packages are `@binary-only`.
 - Test: `go test ./internal/rules/... ./internal/slices/comments/... ./cmd/... -count=1`
+
+## Tests rules
+
+- Start with the four analyzers in `internal/rules/tests` and their catch and leave packages
+  under `testdata/src`.
+- Slice: `internal/slices/tests/command` and `internal/slices/tests/loader`, using the shared
+  checker port.
+- Scenarios: `features/tests.feature`.
+- Test: `go test ./internal/rules/tests/... ./internal/slices/tests/...`.

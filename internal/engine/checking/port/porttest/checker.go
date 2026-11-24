@@ -1,10 +1,10 @@
-// Package porttest provides the in-memory fake of the comments slice's port.
+// Package porttest provides the in-memory fake of the checker port.
 package porttest
 
 import (
 	"context"
 
-	"github.com/donvargaxdev/anti-slop/internal/slices/comments/port"
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
 )
 
 // Checker answers each pattern with the findings or the failure a test

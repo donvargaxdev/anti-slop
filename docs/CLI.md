@@ -100,6 +100,16 @@ The rules a command line can fail as: `flags.unknown`, `flags.repeated`, `flags.
 `command.missing` (80), `command.unknown` (81), and `usage` for any other failure of the line kong
 reports. They are told by the types of the kong fork's parse errors (decision 12), never by text.
 
+## Test reliability reports
+
+`anti-slop tests <pattern>...` accepts Go package patterns. It checks `_test.go`
+files and writes each finding to stdout in the form
+`path:line:col: tests: <reason>`. The command exits 0 after a completed check.
+
+The rules flag calls to `time.Sleep`, loops that consult the wall clock or use a
+`time.After` deadline, direct calls to `os.Setenv` or `os.Unsetenv`, and common
+forms of retrying a failed check or subtest and skipping after a failure.
+
 ## Rules
 
 ### Command names and grammar

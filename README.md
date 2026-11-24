@@ -4,6 +4,9 @@ anti-slop is a command line, built from the Go module
 `github.com/donvargaxdev/anti-slop` and maintained by donvargaxdev.
 `anti-slop count <file>` counts a file's lines and words, `-` for standard input, and
 prints the counts for a person or one JSON object with `--json`.
+`anti-slop tests ./...` reports sleeps, wall-clock polling, direct environment changes
+and flake masking in Go test files. It prints one finding per line and exits 0 when
+the check succeeds, whether or not it finds anything.
 
 ## What it does
 

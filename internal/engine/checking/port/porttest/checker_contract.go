@@ -4,7 +4,7 @@ import (
 	"context"
 	"slices"
 
-	"github.com/donvargaxdev/anti-slop/internal/slices/comments/port"
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
 )
 
 // Reporter is the small test API the contract suite needs, so a *testing.T
@@ -16,7 +16,7 @@ type Reporter interface {
 
 // CheckerCase is what an implementation hands CheckerContract: the Checker
 // under test and three patterns it answers for. Clean names code with no
-// comment a tool does not read, Dirty code with at least two, and Broken
+// findings, Dirty code with at least two, and Broken
 // names nothing that can be loaded.
 type CheckerCase struct {
 	Checker port.Checker

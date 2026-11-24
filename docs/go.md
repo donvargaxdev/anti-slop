@@ -36,20 +36,19 @@ The `count` command is one slice, `internal/slices/count`:
   with `Cancelled` once the context is done, and hands every other path to a fallback it is
   given. It imports nothing of ours but the port.
 
-The `comments` command is the second slice, `internal/slices/comments`, and runs the first rule,
-`internal/rules/comments`:
+The `comments` and `tests` slices run Go analysis rules:
 
 - `internal/rules/<name>` is a rule: a `go/analysis` pass over syntax, importing the standard
   library and the analysis framework and nothing of ours (`rule`, `rule-tests`). Its fixtures are
   `analysistest` packages under `testdata/src`, one that must be caught and one that must be left.
   The graph check lets only an adapter import a rule, and `cmd` assemble one.
-- `port` declares `Checker`, `Finding` and its sealed failures, `Failed` and `Cancelled`.
-  `port/porttest` holds the fake and `CheckerContract`, which the fake and the adapter both pass.
-- `loader` is the adapter: it loads the patterns with go list through `go/packages` and runs the
-  rule over each package's syntax, tests included, each finding once.
-- `command` is the command: `Patterns` is the checked argument (no empty or NUL pattern, none a flag
-  or a loader query), `Run` prints each finding as `path:line:col: comments: <reason>` and exits 0,
-  since the rule only reports, and `Classify` gives the failures their problems.
+- `internal/engine/checking/port` declares `Checker`, `Finding`, checked package patterns and the
+  sealed failures `Failed` and `Cancelled`. Both loaders and the fake pass `CheckerContract`
+  in `port/porttest`.
+- Each slice's `loader` loads the patterns through `go/packages`. The comments loader parses
+  original sources and the tests loader gives the analyzers type-checked syntax.
+- Each slice's `command` prints one line per finding and exits 0 after a completed check.
+  Its `Classify` gives load failures and interruptions their problems.
 
 Around them:
 
@@ -141,7 +140,7 @@ under `internal/`, which no other module can import, so nothing outside reaches 
 | Edge                  | Input                                   | Checked value                                  | Where it is checked                                                                                  |
 | --------------------- | --------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | Command line          | `count`'s file argument                 | `command.Input` (path, or `-` for stdin)       | `command.NewInput`, called by `Run`; an empty argument or one with a NUL byte is `count.input-invalid` |
-| Command line          | `comments`' package arguments           | `command.Patterns` (go list patterns)          | `command.NewPatterns`, called by `Run`; none given, an empty one, one with a NUL byte, one starting with `-` or of the form `name=value` is `comments.pattern-invalid` |
+| Command line          | `comments` and `tests` package arguments | `checking/port.Patterns` (go list patterns)    | `Run` rejects missing or empty patterns, NUL bytes, leading dashes, and loader queries such as `name=value` |
 | Command line          | `--json` and `--no-json`                | kong's bool, in the command's `CLI`          | `internal/cli`'s `Flags` mappers and hook: a value, or a second giving, is `flags.switch-value` or `flags.repeated` |
 | Command line          | an unknown flag or command              | none: refused                                  | kong's parse, told by its typed errors in `internal/cli`'s `ParseProblem`: `flags.unknown`, `command.unknown` |
 | Command line          | `completion`'s shell                    | kong's enum                                    | kong's `enum` tag, refused as a usage failure                                                        |
