@@ -30,7 +30,7 @@ type CLI struct {
 func (CLI) Help() string {
 	return "\nA Go comment may only be one a tool reads: a //go: or //line directive, a //nolint:<linter> with a reason, " +
 		"a build constraint, a license header, a source attribution notice, a generated-file marker, " +
-		"a mutation annotation or a cgo preamble. Every other comment is a finding. " +
+		"a mutation annotation, a cgo preamble or a cgo export directive. Every other comment is a finding. " +
 		"The command only reports: it exits 0 with findings.\n\n" +
 		"    Each finding is one line on stdout: path:line:col: comments: <reason>.\n" +
 		"    There is no --json output yet.\n" +

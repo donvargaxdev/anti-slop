@@ -156,6 +156,35 @@ func TestImportCommentsThatCgoDoesNotConsumeAreReported(t *testing.T) {
 	}
 }
 
+func TestOnlyExportDirectivesThatCgoConsumesArePreserved(t *testing.T) {
+	for _, tc := range []struct {
+		name, imports, declaration string
+		want                       int
+	}{
+		{"export", "import \"C\"", "//export F\nfunc F() {}", 0},
+		{"directive with whitespace", "import (\n\"C\"\n)", "//export  F\t\nfunc F() {}", 0},
+		{"ordinary Go file", "import \"fmt\"", "//export F\nfunc F() {}", 1},
+		{"separated from function", "import \"C\"", "//export F\n\nfunc F() {}", 1},
+		{"attached to variable", "import \"C\"", "//export F\nvar F int", 1},
+		{"wrong name", "import \"C\"", "//export Other\nfunc F() {}", 1},
+		{"missing name", "import \"C\"", "//export\nfunc F() {}", 1},
+		{"ordinary doc with a space", "import \"C\"", "// export F\nfunc F() {}", 1},
+		{"second directive", "import \"C\"", "//export F\n//export F\nfunc F() {}", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := parse(t, "package p\n\n"+tc.imports+"\n\n"+tc.declaration+"\n")
+			found := findings(file)
+			if len(found) != tc.want {
+				t.Fatalf("findings = %v, want %d", found, tc.want)
+			}
+			comments := file.Comments[0].List
+			if tc.want == 1 && found[0].Pos != comments[len(comments)-1].Slash {
+				t.Errorf("findings = %v, want a finding on the last comment", found)
+			}
+		})
+	}
+}
+
 func parse(t *testing.T, source string) *ast.File {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "p.go", source, parser.ParseComments)

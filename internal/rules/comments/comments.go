@@ -5,7 +5,7 @@
 // The comments a tool reads, and so the ones left alone, are the //go:
 // directives (a build constraint is one) and the line directives, //nolint:
 // with a linter and a reason after it, the marker of a generated file, a
-// mutation annotation and a cgo preamble. License headers and source
+// mutation annotation, cgo preambles and cgo export directives. License headers and source
 // attribution notices are also preserved. The Analyzer reports every other
 // comment at its start.
 package comments
@@ -68,14 +68,17 @@ func Report(files []*ast.File, report func(analysis.Diagnostic)) {
 
 func findings(file *ast.File) []analysis.Diagnostic {
 	header := licenseHeader(file)
-	preambles := cgoPreambles(file)
+	cgo := cgoComments(file)
 	var out []analysis.Diagnostic
 	for _, group := range file.Comments {
-		if group == header || preambles[group] || sourceAttribution.MatchString(group.Text()) {
+		if group == header || sourceAttribution.MatchString(group.Text()) {
 			continue
 		}
 		annotation := false
 		for _, c := range group.List {
+			if cgo[c] {
+				continue
+			}
 			if group.End() < file.Package && constraint.IsPlusBuild(c.Text) {
 				continue
 			}
@@ -112,8 +115,9 @@ func licenseHeader(file *ast.File) *ast.CommentGroup {
 	return nil
 }
 
-func cgoPreambles(file *ast.File) map[*ast.CommentGroup]bool {
-	preambles := make(map[*ast.CommentGroup]bool)
+func cgoComments(file *ast.File) map[*ast.Comment]bool {
+	comments := make(map[*ast.Comment]bool)
+	importsC := false
 	for _, decl := range file.Decls {
 		group, ok := decl.(*ast.GenDecl)
 		if !ok {
@@ -124,14 +128,42 @@ func cgoPreambles(file *ast.File) map[*ast.CommentGroup]bool {
 			if !ok || imp.Path.Value != `"C"` {
 				continue
 			}
+			importsC = true
 			doc := imp.Doc
 			if doc == nil && len(group.Specs) == 1 {
 				doc = group.Doc
 			}
-			preambles[doc] = true
+			if doc != nil {
+				for _, comment := range doc.List {
+					comments[comment] = true
+				}
+			}
 		}
 	}
-	return preambles
+	if importsC {
+		for _, decl := range file.Decls {
+			if directive := cgoExport(decl); directive != nil {
+				comments[directive] = true
+			}
+		}
+	}
+	return comments
+}
+
+func cgoExport(decl ast.Decl) *ast.Comment {
+	fn, ok := decl.(*ast.FuncDecl)
+	if !ok || fn.Doc == nil {
+		return nil
+	}
+	for _, c := range fn.Doc.List {
+		if name, export := strings.CutPrefix(c.Text, "//export "); export {
+			if strings.TrimSpace(name) == fn.Name.Name {
+				return c
+			}
+			break
+		}
+	}
+	return nil
 }
 
 func diagnostic(pos token.Pos, reason string) analysis.Diagnostic {
