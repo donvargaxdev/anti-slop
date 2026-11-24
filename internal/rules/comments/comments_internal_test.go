@@ -80,6 +80,7 @@ func TestOnlyALicenseHeaderBeforeThePackageClauseIsLeftAlone(t *testing.T) {
 		{"header", "// Copyright 2026 A.\n\npackage p\n", 0},
 		{"license word", "// MIT License\n\npackage p\n", 0},
 		{"british spelling", "// Licence: MIT\n\npackage p\n", 0},
+		{"after build constraint", "//go:build cgo\n\n// Copyright 2026 A.\n// All rights reserved.\n\npackage p\n", 0},
 		{"no license in the first block", "// the package\n\npackage p\n", 1},
 		{"license block that is not the first", "// the package\n\n// Copyright 2026 A.\n\npackage p\n", 2},
 		{"license after the package clause", "package p\n\n// Copyright 2026 A.\nfunc F() {}\n", 1},
@@ -88,6 +89,65 @@ func TestOnlyALicenseHeaderBeforeThePackageClauseIsLeftAlone(t *testing.T) {
 		if got := len(findings(parse(t, tc.source))); got != tc.want {
 			t.Errorf("%s: %d findings, want %d", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestProvenanceNoticesArePreservedWhereTheyAppear(t *testing.T) {
+	file := parse(t, `// Compile-first mechanics adapted from itos-container T-10, f6f339c (AGPL-3.0).
+
+// Ownership/linked graph probes follow itos-cc's architecture-check design.
+package p
+
+// Harvested with the owner's permission (CONTRIBUTORS.md) from
+// github.com/org/project.
+func F() {}
+
+// Copied from the object as written.
+func G() {}
+
+// This follows the user's preference.
+func H() {}
+`)
+	found := findings(file)
+	if len(found) != 2 || found[0].Pos != file.Comments[3].Pos() || found[1].Pos != file.Comments[4].Pos() {
+		t.Fatalf("findings = %v, want only the ordinary comments", found)
+	}
+}
+
+func TestOnlyThePreambleCgoConsumesIsPreserved(t *testing.T) {
+	for _, tc := range []struct {
+		name, imports string
+	}{
+		{"single import", "// #include <stdlib.h>\nimport \"C\""},
+		{"single import in parentheses", "/* #include <stdlib.h> */\nimport (\n\"C\"\n)"},
+		{"grouped import", "import (\n/* #include <stdlib.h> */\n\"C\"\n\"fmt\"\n)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := parse(t, "package p\n\n"+tc.imports+"\n\n// Go documentation\nvar F int\n")
+			found := findings(file)
+			if len(found) != 1 || found[0].Pos != file.Comments[1].Pos() {
+				t.Fatalf("findings = %v, want only the Go documentation", found)
+			}
+		})
+	}
+}
+
+func TestImportCommentsThatCgoDoesNotConsumeAreReported(t *testing.T) {
+	for _, tc := range []struct {
+		name, imports string
+	}{
+		{"separated from import", "// #include <stdlib.h>\n\nimport \"C\""},
+		{"trailing import", "import \"C\" // #include <stdlib.h>"},
+		{"ordinary import", "// #include <stdlib.h>\nimport \"fmt\""},
+		{"before a group with multiple imports", "// #include <stdlib.h>\nimport (\n\"C\"\n\"fmt\"\n)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := parse(t, "package p\n\n"+tc.imports+"\n")
+			found := findings(file)
+			if len(found) != 1 || found[0].Pos != file.Comments[0].Pos() {
+				t.Fatalf("findings = %v, want the comment that is outside a cgo preamble", found)
+			}
+		})
 	}
 }
 

@@ -111,13 +111,27 @@ func TestAModuleWithNoPackageIsFailed(t *testing.T) {
 	}
 }
 
-func TestACgoPackageKeepsItsLicenseHeader(t *testing.T) {
+func TestACgoPackageKeepsItsLicenseHeaderAndPreamble(t *testing.T) {
 	t.Setenv("CGO_ENABLED", "1")
 	dir := module(t, map[string]string{
-		"c/c.go": "// Copyright 2026 A.\n\npackage c\n\nimport \"C\"\n\nfunc F() { _ = C.int(1) }\n\n// here\nfunc G() {}\n",
+		"c/c.go": `//go:build cgo
+
+// Copyright 2026 A.
+// All rights reserved.
+
+package c
+
+// #include <stdlib.h>
+import "C"
+
+func F() { _ = C.int(1) }
+
+// here
+func G() {}
+`,
 	})
 	got, failure := loader.Checker{Dir: dir}.Check(t.Context(), []string{"./c"})
-	if failure != nil || len(got) != 1 || got[0].Line != 9 || got[0].Col != 1 {
-		t.Errorf("Check = %v, %v, want one finding at line 9, the header left alone", got, failure)
+	if failure != nil || len(got) != 1 || got[0].Path != filepath.Join("c", "c.go") || got[0].Line != 13 || got[0].Col != 1 {
+		t.Errorf("Check = %v, %v, want one finding at c/c.go:13:1", got, failure)
 	}
 }

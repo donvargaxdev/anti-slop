@@ -4,13 +4,15 @@
 //
 // The comments a tool reads, and so the ones left alone, are the //go:
 // directives (a build constraint is one) and the line directives, //nolint:
-// with a linter and a reason after it, a license header, the marker of a
-// generated file and the block of a mutation run's annotation. Every other
-// comment is one finding at its start, reported by the Analyzer.
+// with a linter and a reason after it, the marker of a generated file, a
+// mutation annotation and a cgo preamble. License headers and source
+// attribution notices are also preserved. The Analyzer reports every other
+// comment at its start.
 package comments
 
 import (
 	"go/ast"
+	"go/build/constraint"
 	"go/token"
 	"regexp"
 	"strings"
@@ -41,6 +43,13 @@ var Analyzer = &analysis.Analyzer{
 
 var nolintLinters = regexp.MustCompile(`^//nolint:[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*(\s.*)?$`)
 
+const sourceProject = `(?:\bitos(?:-cc|-container|-template)?\b|(?:[\w.-]+/)+[\w.-]+)`
+
+var sourceAttribution = regexp.MustCompile(`(?i)\b(?:(?:adapted|copied|derived|harvested|ported|taken)\s+` +
+	`(?:with\s+the\s+owner's\s+permission\s+(?:\([^)]*\)\s+)?)?from|based\s+on)\s+` +
+	`(?:the\s+owner's\s+)?(?:https?://)?` + sourceProject +
+	`|\bfollows?\s+` + sourceProject + `'s\s+[\w-]+\s+design\b`)
+
 func run(pass *analysis.Pass) (any, error) {
 	Report(pass.Files, pass.Report)
 	return nil, nil
@@ -57,14 +66,15 @@ func Report(files []*ast.File, report func(analysis.Diagnostic)) {
 }
 
 func findings(file *ast.File) []analysis.Diagnostic {
+	header := licenseHeader(file)
+	preambles := cgoPreambles(file)
 	var out []analysis.Diagnostic
-	for i, group := range file.Comments {
-		header := i == 0 && group.End() < file.Package && isLicense(group)
+	for _, group := range file.Comments {
+		if group == header || preambles[group] || sourceAttribution.MatchString(group.Text()) {
+			continue
+		}
 		annotation := false
 		for _, c := range group.List {
-			if header {
-				continue
-			}
 			if strings.HasPrefix(c.Text, mutationOpen) {
 				annotation = true
 			}
@@ -78,6 +88,44 @@ func findings(file *ast.File) []analysis.Diagnostic {
 		}
 	}
 	return out
+}
+
+func licenseHeader(file *ast.File) *ast.CommentGroup {
+	for _, group := range file.Comments {
+		if group.End() >= file.Package {
+			break
+		}
+		if len(group.List) == 1 && constraint.IsGoBuild(group.List[0].Text) {
+			continue
+		}
+		if isLicense(group) {
+			return group
+		}
+		break
+	}
+	return nil
+}
+
+func cgoPreambles(file *ast.File) map[*ast.CommentGroup]bool {
+	preambles := make(map[*ast.CommentGroup]bool)
+	for _, decl := range file.Decls {
+		group, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range group.Specs {
+			imp, ok := spec.(*ast.ImportSpec)
+			if !ok || imp.Path.Value != `"C"` {
+				continue
+			}
+			doc := imp.Doc
+			if doc == nil && len(group.Specs) == 1 {
+				doc = group.Doc
+			}
+			preambles[doc] = true
+		}
+	}
+	return preambles
 }
 
 func diagnostic(pos token.Pos, reason string) analysis.Diagnostic {

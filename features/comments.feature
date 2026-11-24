@@ -4,7 +4,8 @@ Feature: Comments
   one a tool reads. Code explains itself and tests carry the why, so a doc comment and a
   comment that says why are findings alike. The comments a tool reads are left alone: the
   //go: and //line directives, //nolint:<linter> with a reason after it, a license header, a
-  generated-file marker and a mutation annotation. Each finding is one line on stdout,
+  generated-file marker and a mutation annotation. Source attribution notices and cgo
+  preambles are also preserved. Each finding is one line on stdout,
   path:line:col: comments: <reason>. The command only reports: it exits 0 with findings and
   with none. Its patterns are read as go list reads them, so a pattern that matches no
   package exits 82, and one go list would take for a flag exits 80. The command loads
@@ -40,10 +41,12 @@ Feature: Comments
       """
     And the file "p.go" holds:
       """
-      // Copyright 2026 The Authors.
-
       //go:build !ignore
 
+      // Copyright 2026 The Authors.
+
+      // Compile-first mechanics adapted from itos-container T-10, f6f339c (AGPL-3.0).
+      // Ownership/linked graph probes follow itos-cc's architecture-check design.
       package p
 
       //go:noinline
