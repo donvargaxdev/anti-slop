@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/tools/go/analysis"
 
-	"github.com/donvargaxdev/anti-slop/internal/slices/comments/port"
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
 )
 
 func TestCancellationWhileReportingSources(t *testing.T) {

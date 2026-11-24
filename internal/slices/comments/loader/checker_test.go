@@ -6,9 +6,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port/porttest"
 	"github.com/donvargaxdev/anti-slop/internal/slices/comments/loader"
-	"github.com/donvargaxdev/anti-slop/internal/slices/comments/port"
-	"github.com/donvargaxdev/anti-slop/internal/slices/comments/port/porttest"
 )
 
 func module(t *testing.T, files map[string]string) string {
