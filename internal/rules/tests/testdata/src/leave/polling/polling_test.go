@@ -92,6 +92,49 @@ func TestDeadlineReassignedBeforeReceive(t *testing.T) {
 	}
 }
 
+func receiveAfterRequiredFor(ready <-chan time.Time) {
+	ch := time.After(time.Millisecond)
+	for {
+		ch = ready
+		break
+	}
+	for range 3 {
+		<-ch
+	}
+	ch = time.After(time.Millisecond)
+	for true {
+		ch = ready
+		break
+	}
+	for range 3 {
+		<-ch
+	}
+}
+
+func receiveAfterRequiredRange(ready <-chan time.Time) {
+	ch := time.After(time.Millisecond)
+	for range 1 {
+		ch = ready
+	}
+	for range 3 {
+		<-ch
+	}
+	ch = time.After(time.Millisecond)
+	for range "x" {
+		ch = ready
+	}
+	for range 3 {
+		<-ch
+	}
+	ch = time.After(time.Millisecond)
+	for range &[1]int{} {
+		ch = ready
+	}
+	for range 3 {
+		<-ch
+	}
+}
+
 func TestDeadlineReassignedOnBothBranches(t *testing.T) {
 	ready := make(chan time.Time)
 	other := make(chan time.Time)

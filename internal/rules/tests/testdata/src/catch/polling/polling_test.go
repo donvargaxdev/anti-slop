@@ -153,6 +153,52 @@ func TestDeadlineAssignedForNextIteration(t *testing.T) {
 	}
 }
 
+func pollAfterOptionalRange(n int, ready <-chan Time) {
+	ch := After(Millisecond)
+	for range n {
+		ch = ready
+		<-ch
+	}
+	for { // want "polling against the wall clock"
+		select {
+		case <-ch:
+			return
+		default:
+		}
+	}
+}
+
+func pollAfterOptionalFor(run bool, ready <-chan Time) {
+	ch := After(Millisecond)
+	for run {
+		ch = ready
+		break
+	}
+	for { // want "polling against the wall clock"
+		<-ch
+		return
+	}
+}
+
+func pollAfterEmptyLoops(ready <-chan Time) {
+	ch := After(Millisecond)
+	for false {
+		ch = ready
+	}
+	for range 0 {
+		ch = ready
+	}
+	for range "" {
+		ch = ready
+	}
+	for range [0]int{} {
+		ch = ready
+	}
+	for range 1 { // want "polling against the wall clock"
+		<-ch
+	}
+}
+
 func TestPollUntilBreak(t *testing.T) {
 	start := Now()
 	for { // want "polling against the wall clock"

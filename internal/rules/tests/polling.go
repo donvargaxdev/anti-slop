@@ -2,6 +2,7 @@ package tests
 
 import (
 	"go/ast"
+	"go/constant"
 	"go/token"
 	"go/types"
 	"maps"
@@ -98,10 +99,12 @@ func (scan deadlineScan) visit(node ast.Node) bool {
 		scan.recordSwitch(expr.Body)
 	case *ast.ForStmt:
 		scan.record(expr.Init)
-		scan.recordLoop(expr.Cond, expr.Body, expr.Post)
+		condition := scan.info.Types[expr.Cond].Value
+		maySkip := expr.Cond != nil && (condition == nil || !constant.BoolVal(condition))
+		scan.recordLoop(maySkip, expr.Cond, expr.Body, expr.Post)
 	case *ast.RangeStmt:
 		scan.record(expr.X)
-		scan.recordLoop(expr.Key, expr.Value, expr.Body)
+		scan.recordLoop(scan.rangeMayBeEmpty(expr.X), expr.Key, expr.Value, expr.Body)
 	case *ast.AssignStmt:
 		scan.recordAssignment(expr)
 	case *ast.ValueSpec:
@@ -159,7 +162,26 @@ func isFallthrough(stmt ast.Stmt) bool {
 	return ok && branch.Tok == token.FALLTHROUGH
 }
 
-func (scan deadlineScan) recordLoop(parts ...ast.Node) {
+func (scan deadlineScan) rangeMayBeEmpty(expr ast.Expr) bool {
+	if value := scan.info.Types[expr].Value; value != nil {
+		switch value.Kind() {
+		case constant.Int:
+			return constant.Sign(value) <= 0
+		case constant.String:
+			return constant.StringVal(value) == ""
+		}
+	}
+	underlying := scan.info.TypeOf(expr).Underlying()
+	if pointer, ok := underlying.(*types.Pointer); ok {
+		underlying = pointer.Elem().Underlying()
+	}
+	if array, ok := underlying.(*types.Array); ok {
+		return array.Len() == 0
+	}
+	return true
+}
+
+func (scan deadlineScan) recordLoop(maySkip bool, parts ...ast.Node) {
 	entry := scan.fork()
 	for {
 		for _, part := range parts {
@@ -169,6 +191,10 @@ func (scan deadlineScan) recordLoop(parts ...ast.Node) {
 		previous := len(entry.channels)
 		maps.Copy(entry.channels, scan.channels)
 		if len(entry.channels) == previous {
+			if maySkip {
+				// The loop can leave incoming deadlines untouched by skipping its body.
+				maps.Copy(scan.channels, entry.channels)
+			}
 			return
 		}
 		maps.Copy(scan.channels, entry.channels)
