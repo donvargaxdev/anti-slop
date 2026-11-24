@@ -23,12 +23,9 @@ import (
 type Checker struct{ Dir string }
 
 // Check loads the packages of patterns with their tests, parses the source
-// files they list as written, never the rewritten input of cgo, so a license
-// header stays the first comment of its file, and gives each finding of the
-// rule once. A package that cannot be loaded or parsed is a Failed failure with
-// the first error, and a done ctx is Cancelled.
-// parsed is a Failed failure with the loader's first error, and a done ctx is
-// Cancelled.
+// files they list, and gives each finding once. The original source preserves
+// cgo license headers and preambles. A package that cannot be loaded or parsed
+// is a Failed failure with the first error, and a done ctx is Cancelled.
 func (c Checker) Check(ctx context.Context, patterns []string) ([]port.Finding, port.CheckFailure) {
 	fset := token.NewFileSet()
 	pkgs, err := packages.Load(&packages.Config{
@@ -53,24 +50,41 @@ func (c Checker) Check(ctx context.Context, patterns []string) ([]port.Finding, 
 		if len(pkg.Errors) > 0 {
 			return nil, &port.Failed{Reason: pkg.Errors[0].Error()}
 		}
-		files := make([]*ast.File, 0, len(pkg.GoFiles))
-		for _, name := range pkg.GoFiles {
-			file, err := parser.ParseFile(fset, name, nil, parser.ParseComments|parser.SkipObjectResolution)
-			if err != nil {
-				return nil, &port.Failed{Reason: err.Error()}
-			}
-			files = append(files, file)
-		}
-		var reported []port.Finding
-		comments.Report(files, func(d analysis.Diagnostic) {
+		failure := reportSources(ctx, fset, pkg.GoFiles, func(d analysis.Diagnostic) {
 			at := fset.Position(d.Pos)
-			reported = append(reported, port.Finding{
+			found = append(found, port.Finding{
 				Path: relative(root, at.Filename), Line: at.Line, Col: at.Column, Rule: d.Category, Reason: d.Message,
 			})
 		})
-		found = port.Merge(found, reported)
+		if failure != nil {
+			return nil, failure
+		}
+	}
+	found = port.Merge(nil, found)
+	if ctx.Err() != nil {
+		return nil, &port.Cancelled{}
 	}
 	return found, nil
+}
+
+func reportSources(ctx context.Context, fset *token.FileSet, names []string, report func(analysis.Diagnostic)) port.CheckFailure {
+	for _, name := range names {
+		if ctx.Err() != nil {
+			break
+		}
+		file, err := parser.ParseFile(fset, name, nil, parser.ParseComments|parser.SkipObjectResolution)
+		if ctx.Err() != nil {
+			break
+		}
+		if err != nil {
+			return &port.Failed{Reason: err.Error()}
+		}
+		comments.Report([]*ast.File{file}, report)
+	}
+	if ctx.Err() != nil {
+		return &port.Cancelled{}
+	}
+	return nil
 }
 
 // relative is name below root as a relative path, or name as it is when it

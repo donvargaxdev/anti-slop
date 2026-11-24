@@ -115,6 +115,7 @@ func TestACgoPackageKeepsItsLicenseHeaderAndPreamble(t *testing.T) {
 	t.Setenv("CGO_ENABLED", "1")
 	dir := module(t, map[string]string{
 		"c/c.go": `//go:build cgo
+// +build cgo
 
 // Copyright 2026 A.
 // All rights reserved.
@@ -131,7 +132,7 @@ func G() {}
 `,
 	})
 	got, failure := loader.Checker{Dir: dir}.Check(t.Context(), []string{"./c"})
-	if failure != nil || len(got) != 1 || got[0].Path != filepath.Join("c", "c.go") || got[0].Line != 13 || got[0].Col != 1 {
-		t.Errorf("Check = %v, %v, want one finding at c/c.go:13:1", got, failure)
+	if failure != nil || len(got) != 1 || got[0].Path != filepath.Join("c", "c.go") || got[0].Line != 14 || got[0].Col != 1 {
+		t.Errorf("Check = %v, %v, want one finding at c/c.go:14:1", got, failure)
 	}
 }

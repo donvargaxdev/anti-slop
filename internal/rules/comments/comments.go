@@ -15,6 +15,7 @@ import (
 	"go/build/constraint"
 	"go/token"
 	"regexp"
+	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -75,6 +76,9 @@ func findings(file *ast.File) []analysis.Diagnostic {
 		}
 		annotation := false
 		for _, c := range group.List {
+			if group.End() < file.Package && constraint.IsPlusBuild(c.Text) {
+				continue
+			}
 			if strings.HasPrefix(c.Text, mutationOpen) {
 				annotation = true
 			}
@@ -95,7 +99,9 @@ func licenseHeader(file *ast.File) *ast.CommentGroup {
 		if group.End() >= file.Package {
 			break
 		}
-		if len(group.List) == 1 && constraint.IsGoBuild(group.List[0].Text) {
+		if !slices.ContainsFunc(group.List, func(c *ast.Comment) bool {
+			return !constraint.IsGoBuild(c.Text) && !constraint.IsPlusBuild(c.Text) && !isGeneratedMarker(c.Text)
+		}) {
 			continue
 		}
 		if isLicense(group) {
@@ -142,10 +148,14 @@ func judge(c *ast.Comment) string {
 			return ""
 		}
 		return reasonNolint
-	case strings.HasPrefix(text, generatedStart) && strings.HasSuffix(text, generatedEnd):
+	case isGeneratedMarker(text):
 		return ""
 	}
 	return reasonUnread
+}
+
+func isGeneratedMarker(text string) bool {
+	return strings.HasPrefix(text, generatedStart) && strings.HasSuffix(text, generatedEnd)
 }
 
 func hasReason(text string) bool {

@@ -42,6 +42,7 @@ Feature: Comments
     And the file "p.go" holds:
       """
       //go:build !ignore
+      // +build !ignore
 
       // Copyright 2026 The Authors.
 

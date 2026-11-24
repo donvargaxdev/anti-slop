@@ -1,8 +1,11 @@
+//go:build !ignore
+// +build !ignore
+
 // Copyright 2026 The Authors. All rights reserved.
 // Use of this source code is governed by the MIT license.
 
-//go:build !ignore
-
+// Compile-first mechanics adapted from itos-container T-10, f6f339c (AGPL-3.0).
+// Ownership/linked graph probes follow itos-cc's architecture-check design.
 package leave
 
 import _ "unsafe"
