@@ -64,6 +64,85 @@ func TestDeadlineOnOneBranch(t *testing.T) {
 	}
 }
 
+func TestDeadlineOnUnmatchedSwitch(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	ch := After(Millisecond)
+	switch t.Name() {
+	case "use readiness channel":
+		ch = ready
+	}
+	for { // want "polling against the wall clock"
+		select {
+		case <-ch:
+			return
+		default:
+		}
+	}
+}
+
+func TestDeadlineOnOneSwitchCase(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	switch ch := After(Millisecond); t.Name() {
+	case "use readiness channel":
+		ch = ready
+	default:
+		for range 3 { // want "polling against the wall clock"
+			<-ch
+		}
+	}
+}
+
+func TestDeadlineFallsThrough(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	ch := (<-chan Time)(ready)
+	switch t.Name() {
+	case "use deadline":
+		ch = After(Millisecond)
+		if ch != nil {
+			goto receive
+		}
+	receive:
+		fallthrough
+	default:
+		for range 3 { // want "polling against the wall clock"
+			<-ch
+		}
+	}
+}
+
+func TestDeadlineOnOneTypeSwitchCase(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	ch := (<-chan Time)(ready)
+	switch deadline := After(Millisecond); any(t).(type) {
+	case *testing.T:
+		ch = deadline
+	default:
+		ch = ready
+	}
+	for range 3 { // want "polling against the wall clock"
+		<-ch
+	}
+}
+
+func TestDeadlineInSwitchExpressions(t *testing.T) {
+	ch := After(Millisecond)
+	for range 1 { // want "polling against the wall clock"
+		switch <-ch {
+		case Time{}:
+		}
+	}
+	ch = After(Millisecond)
+	for range 1 { // want "polling against the wall clock"
+		switch (Time{}) {
+		case <-ch:
+		}
+	}
+}
+
 func TestDeadlineAssignedForNextIteration(t *testing.T) {
 	ready := make(chan Time)
 	close(ready)

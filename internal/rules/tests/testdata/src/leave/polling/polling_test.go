@@ -108,6 +108,39 @@ func TestDeadlineReassignedOnBothBranches(t *testing.T) {
 	}
 }
 
+func TestDeadlineReassignedOnEverySwitchCase(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Millisecond)
+	switch t.Name() {
+	default:
+		ch = ready
+	case "use different readiness channel":
+		other := make(chan time.Time)
+		close(other)
+		ch = other
+	}
+	for range 3 {
+		<-ch
+	}
+}
+
+func TestDeadlineReassignedAfterFallthrough(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := (<-chan time.Time)(ready)
+	switch t.Name() {
+	case "create deadline":
+		ch = time.After(time.Millisecond)
+		fallthrough
+	default:
+		ch = ready
+	}
+	for range 3 {
+		<-ch
+	}
+}
+
 func TestTimingDoesNotExitLoop(t *testing.T) {
 	start := time.Now()
 	for range 3 {

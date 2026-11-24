@@ -88,6 +88,14 @@ func (scan deadlineScan) visit(node ast.Node) bool {
 		scan.record(expr.Body)
 		other.record(expr.Else)
 		maps.Copy(scan.channels, other.channels)
+	case *ast.SwitchStmt:
+		scan.record(expr.Init)
+		scan.record(expr.Tag)
+		scan.recordSwitch(expr.Body)
+	case *ast.TypeSwitchStmt:
+		scan.record(expr.Init)
+		scan.record(expr.Assign)
+		scan.recordSwitch(expr.Body)
 	case *ast.ForStmt:
 		scan.record(expr.Init)
 		scan.recordLoop(expr.Cond, expr.Body, expr.Post)
@@ -110,6 +118,45 @@ func (scan deadlineScan) visit(node ast.Node) bool {
 		return true
 	}
 	return false
+}
+
+func (scan deadlineScan) recordSwitch(body *ast.BlockStmt) {
+	entry := scan.fork()
+	clear(scan.channels)
+	hasDefault := false
+	var fallingThrough map[types.Object]bool
+	for _, stmt := range body.List {
+		clause := stmt.(*ast.CaseClause)
+		hasDefault = hasDefault || clause.List == nil
+		branch := entry.fork()
+		for _, expr := range clause.List {
+			branch.record(expr)
+		}
+		// Fallthrough enters the case body without testing the case expressions.
+		maps.Copy(branch.channels, fallingThrough)
+		fallsThrough := false
+		for _, stmt := range clause.Body {
+			branch.record(stmt)
+			fallsThrough = fallsThrough || isFallthrough(stmt)
+		}
+		if fallsThrough {
+			fallingThrough = branch.channels
+			continue
+		}
+		fallingThrough = nil
+		maps.Copy(scan.channels, branch.channels)
+	}
+	if !hasDefault {
+		maps.Copy(scan.channels, entry.channels)
+	}
+}
+
+func isFallthrough(stmt ast.Stmt) bool {
+	for label, ok := stmt.(*ast.LabeledStmt); ok; label, ok = stmt.(*ast.LabeledStmt) {
+		stmt = label.Stmt
+	}
+	branch, ok := stmt.(*ast.BranchStmt)
+	return ok && branch.Tok == token.FALLTHROUGH
 }
 
 func (scan deadlineScan) recordLoop(parts ...ast.Node) {
