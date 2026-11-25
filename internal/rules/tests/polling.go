@@ -42,6 +42,7 @@ type pollingScan struct {
 	continuations *pollingContinuations
 	returns       *pollingFlow
 	result        *types.Var
+	returnGuard   bool
 }
 
 type pollingFlow struct {
@@ -174,9 +175,12 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 			scan.clockGuards[expr] = true
 		}
 		before := scan.continueCount()
+		outerReturnGuard := scan.returnGuard
+		scan.returnGuard = outerReturnGuard || clockGuard
 		other := scan.fork()
 		scan.record(expr.Body)
 		other.record(expr.Else)
+		scan.returnGuard = outerReturnGuard
 		scan.pollingFlow = mergePollingFlows(scan.pollingFlow, other.pollingFlow)
 		scan.markBypassed(clockGuard && scan.continueCount() != before)
 	case *ast.SwitchStmt:
@@ -203,9 +207,13 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 		for _, result := range expr.Results {
 			scan.record(result)
 		}
-		if scan.result != nil && len(expr.Results) == 1 {
-			// Merge explicit results the same way as named results on bare returns.
-			scan.store(scan.result, scan.dependsOn(expr.Results[0], scan.tracked))
+		if scan.result != nil {
+			dependsOnClock := scan.tracked[scan.result]
+			if len(expr.Results) == 1 {
+				dependsOnClock = scan.dependsOn(expr.Results[0], scan.tracked)
+			}
+			// A clock guard can select this return even if its value is constant.
+			scan.store(scan.result, scan.returnGuard || dependsOnClock)
 		}
 		scan.recordExit()
 		if scan.returns != nil {
@@ -293,6 +301,7 @@ func (scan *pollingScan) recordLiteral(literal *ast.FuncLit, returns *pollingFlo
 	scan.bypassed = false
 	scan.returns = returns
 	scan.result = result
+	scan.returnGuard = false
 	scan.record(literal.Body)
 }
 
@@ -451,9 +460,6 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 	if bounds.maxIterations == 0 {
 		return false
 	}
-	if usesClockValue(info, condition, nil, nil) {
-		return true
-	}
 	if pollsIn(info, condition, receives, nil) || pollsIn(info, post, receives, nil) {
 		return true
 	}
@@ -486,15 +492,27 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 }
 
 func usesClockValue(info *types.Info, expr ast.Expr, tracked map[types.Object]bool, calls map[*ast.CallExpr]bool) bool {
-	return contains(expr, func(node ast.Node) bool {
-		switch value := node.(type) {
-		case *ast.Ident:
-			return tracked[info.Uses[value]]
-		case *ast.CallExpr:
-			return calls[value] || packageCall(info, value, "time", "Now", "Since", "Until")
+	found := false
+	ast.Inspect(expr, func(node ast.Node) bool {
+		if node == nil || found {
+			return false
 		}
-		return false
+		switch value := node.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.Ident:
+			found = tracked[info.Uses[value]]
+		case *ast.CallExpr:
+			if immediateLiteral(value, nil) != nil {
+				// The result may depend on only some of the arguments.
+				found = calls[value]
+				return false
+			}
+			found = packageCall(info, value, "time", "Now", "Since", "Until")
+		}
+		return !found
 	})
+	return found
 }
 
 func afterDeadline(info *types.Info, expr ast.Expr, deadlines map[types.Object]bool, calls map[*ast.CallExpr]bool) bool {

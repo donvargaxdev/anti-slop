@@ -84,6 +84,34 @@ func pollWithNamedResult() {
 	}
 }
 
+func pollWithClockControlledReturn() {
+	start := Now()
+	for func() bool { // want "polling against the wall clock"
+		if Since(start) > Second {
+			return false
+		}
+		return true
+	}() {
+	}
+}
+
+func pollWithClockArgument() {
+	for (func(now Time) bool { return now.Before(Time{}) })(Now()) { // want "polling against the wall clock"
+	}
+}
+
+func pollWithClockControlledBareReturn() {
+	start := Now()
+	for func() (keepGoing bool) { // want "polling against the wall clock"
+		switch {
+		case Since(start) > Second:
+			return
+		}
+		return true
+	}() {
+	}
+}
+
 func pollWithCapturedRefresh() {
 	start := Now()
 	var elapsed Duration

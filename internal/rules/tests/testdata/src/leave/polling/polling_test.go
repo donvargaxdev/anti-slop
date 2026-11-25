@@ -105,6 +105,27 @@ func immediatePredicateWithFixedSnapshot() {
 	}
 }
 
+func TestImmediatePredicateWithClockArgumentOnlyForLogging(t *testing.T) {
+	for func(now time.Time) bool {
+		t.Log(now)
+		return testing.Short()
+	}(time.Now()) {
+		break
+	}
+}
+
+func TestImmediatePredicateWithClockGuardOnlyForLogging(t *testing.T) {
+	start := time.Now()
+	for func() bool {
+		if time.Since(start) > time.Second {
+			t.Log("slow")
+		}
+		return testing.Short()
+	}() {
+		break
+	}
+}
+
 func receiveReadyChannelReturnedByImmediateCall() {
 	ready := make(chan time.Time)
 	close(ready)
