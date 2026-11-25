@@ -44,7 +44,7 @@ type flakeReturns struct {
 	onlyShort bool
 }
 
-type outcomePolarity uint8
+type outcomePolarity uint16
 
 const (
 	failsWhenTrue outcomePolarity = 1 << iota
@@ -52,6 +52,10 @@ const (
 	shortMode
 	refreshedError
 	nilError
+	constantTrue
+	constantFalse
+	guardedTrue
+	guardedFalse
 )
 
 func runFlakes(pass *analysis.Pass) (any, error) {
@@ -226,6 +230,9 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 			for i, name := range stmt.Names {
 				if len(stmt.Values) == 0 {
 					outcomes[i] = nilError
+					if booleanResult(c.info, name) {
+						outcomes[i] = c.constantAssignment(false)
+					}
 				}
 				c.storeOutcome(name, outcomes[i])
 			}
@@ -518,18 +525,23 @@ func mergeOutcomes(dst, src map[types.Object]outcomePolarity) map[types.Object]o
 	if src == nil {
 		return dst
 	}
-	// Definite facts must hold on every incoming path.
 	for object, polarity := range dst {
-		if (polarity == shortMode || polarity == nilError) && src[object] != polarity {
-			delete(dst, object)
+		if _, shared := src[object]; !shared {
+			writeOutcome(dst, object, joinOutcome(polarity, 0))
 		}
 	}
 	for object, polarity := range src {
-		if polarity != shortMode && polarity != nilError {
-			dst[object] |= polarity
-		}
+		writeOutcome(dst, object, joinOutcome(dst[object], polarity))
 	}
 	return dst
+}
+
+func writeOutcome(outcomes map[types.Object]outcomePolarity, object types.Object, polarity outcomePolarity) {
+	if polarity == 0 {
+		delete(outcomes, object)
+	} else {
+		outcomes[object] = polarity
+	}
 }
 
 // assignmentOutcomes evaluates each operand before any target is updated.
@@ -552,6 +564,10 @@ func (c *flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int, vis
 			} else if c.retryHeader {
 				outcomes[i] = c.retryErrorOutcome(value)
 			}
+			continue
+		}
+		if constantValue := c.info.Types[value].Value; constantValue != nil {
+			outcomes[i] = c.constantAssignment(constant.BoolVal(constantValue))
 			continue
 		}
 		outcomes[i] = c.booleanOutcome(value)
@@ -601,7 +617,7 @@ func (c *flakeChecks) constrainOutcome(condition ast.Expr, possible outcomePolar
 		object := c.info.Uses[expr]
 		polarity := c.outcomes[object]
 		if polarity != shortMode && !c.outcomeReassigned(object, later) {
-			c.storeOutcome(expr, polarity&possible)
+			c.storeOutcome(expr, restrictBooleanOutcome(polarity, possible))
 		}
 	case *ast.UnaryExpr:
 		if expr.Op == token.NOT {
@@ -639,9 +655,5 @@ func (c flakeChecks) storeObjectOutcome(object types.Object, polarity outcomePol
 	if polarity == nilError && !c.tracksNilError(object) {
 		polarity = 0
 	}
-	if polarity == 0 {
-		delete(c.outcomes, object)
-	} else {
-		c.outcomes[object] = polarity
-	}
+	writeOutcome(c.outcomes, object, polarity)
 }

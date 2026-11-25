@@ -849,3 +849,12 @@ func TestClockShortCircuitDoesNotTaintFollowingAssignments(t *testing.T) {
 		}
 	}
 }
+
+func TestClockOnRightOfShortCircuit(t *testing.T) {
+	for {
+		_ = func() bool {
+			t.Fatal("unconditional termination")
+			return false
+		}() && time.Now().IsZero()
+	}
+}

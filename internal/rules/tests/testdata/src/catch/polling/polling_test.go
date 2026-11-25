@@ -913,3 +913,19 @@ func TestClockDisjunctionAndConjunctionSetTimeoutFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestTimeoutInShortCircuit(t *testing.T) {
+	start := Now()
+	for { // want "polling against the wall clock"
+		_ = Since(start) > Second && func() bool {
+			t.Fatal("timeout")
+			return true
+		}()
+	}
+	for { // want "polling against the wall clock"
+		_ = Until(start) > 0 || func() bool {
+			t.FailNow()
+			return false
+		}()
+	}
+}

@@ -1181,3 +1181,38 @@ func TestRetryUntilSuccessWithIndependentRequirement(t *test.T) {
 		}
 	}
 }
+
+func TestSkipOnFlagSetAfterFailure(t *test.T) {
+	failed := false
+	if t.Failed() {
+		failed = true
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnFlagClearedAfterFailure(t *test.T) {
+	var ready bool
+	if !t.Failed() {
+		ready = true
+	} else {
+		ready = false
+	}
+	if !ready {
+		t.SkipNow() // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnNamedFlagReturnedAfterFailure(t *test.T) {
+	if func() (failed bool) {
+		if t.Failed() {
+			failed = true
+			return
+		}
+		failed = false
+		return
+	}() {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}

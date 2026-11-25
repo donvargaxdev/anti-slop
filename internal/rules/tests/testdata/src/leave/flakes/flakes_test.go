@@ -1231,3 +1231,23 @@ func TestFailFastWithAdditionalSuccessRequirement(t *testing.T) {
 		t.Fatal("failed")
 	}
 }
+
+func TestSkipOnFlagSetRegardlessOfFailure(t *testing.T) {
+	skip := true
+	if t.Failed() {
+		skip = true
+	}
+	if skip {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipOnFlagSetForOtherReasons(t *testing.T) {
+	skip := testing.Verbose()
+	if t.Failed() {
+		skip = true
+	}
+	if skip {
+		t.Skip("optional")
+	}
+}

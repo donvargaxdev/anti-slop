@@ -11,6 +11,12 @@ func (c flakeChecks) recordBooleanReturn(stmt *ast.ReturnStmt) {
 	returns := c.returns
 	possible := failsWhenTrue | failsWhenFalse
 	polarity := c.outcomes[returns.result]
+	if polarity&constantTrue != 0 {
+		possible = failsWhenTrue
+	} else if polarity&constantFalse != 0 {
+		possible = failsWhenFalse
+	}
+	polarity = polarity.withGuardedAssignments()
 	if len(stmt.Results) == 1 {
 		expr := stmt.Results[0]
 		polarity = c.booleanOutcome(expr)
@@ -144,7 +150,7 @@ func (c flakeChecks) checkCondition(condition ast.Expr, truth, wantFailure bool,
 			return !failure && c.retryBooleanCheck(expr) && booleanResult(c.info, expr) && !c.isShortMode(expr)
 		}
 	case *ast.Ident:
-		polarity := c.outcomes[c.info.ObjectOf(expr)]
+		polarity := c.outcomes[c.info.ObjectOf(expr)].withGuardedAssignments()
 		if polarity == shortMode {
 			return false
 		}
@@ -156,6 +162,51 @@ func (c flakeChecks) checkCondition(condition ast.Expr, truth, wantFailure bool,
 		}
 	}
 	return false
+}
+
+func (c flakeChecks) constantAssignment(value bool) outcomePolarity {
+	if value {
+		if c.failureGuard {
+			return constantTrue | guardedTrue
+		}
+		return constantTrue
+	}
+	if c.failureGuard {
+		return constantFalse | guardedFalse
+	}
+	return constantFalse
+}
+
+func joinOutcome(left, right outcomePolarity) outcomePolarity {
+	// Keep definite facts only when both paths agree.
+	joined := left & right & (shortMode | nilError | constantTrue | constantFalse)
+	joined |= (left | right) & (failsWhenTrue | failsWhenFalse | refreshedError)
+	// A guarded assignment implies failure only if the other path also
+	// requires failure for that value or can only produce the opposite value.
+	if either := guardedTrue | failsWhenTrue | constantFalse; (left|right)&guardedTrue != 0 && left&either != 0 && right&either != 0 {
+		joined |= guardedTrue
+	}
+	if either := guardedFalse | failsWhenFalse | constantTrue; (left|right)&guardedFalse != 0 && left&either != 0 && right&either != 0 {
+		joined |= guardedFalse
+	}
+	return joined
+}
+
+func (polarity outcomePolarity) withGuardedAssignments() outcomePolarity {
+	if polarity&guardedTrue != 0 {
+		polarity |= failsWhenTrue
+	}
+	if polarity&guardedFalse != 0 {
+		polarity |= failsWhenFalse
+	}
+	return polarity
+}
+
+func restrictBooleanOutcome(polarity, possible outcomePolarity) outcomePolarity {
+	if possible == failsWhenTrue {
+		return polarity & (failsWhenTrue | constantTrue | guardedTrue)
+	}
+	return polarity & (failsWhenFalse | constantFalse | guardedFalse)
 }
 
 func (c flakeChecks) checkComparison(expr *ast.BinaryExpr, truth, wantFailure bool, attempt ast.Node) bool {

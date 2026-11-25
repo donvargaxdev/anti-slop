@@ -314,6 +314,9 @@ func (scan *pollingScan) recordShortCircuit(expr *ast.BinaryExpr) {
 		return
 	}
 	right := scan.fork()
+	if clockGuard {
+		right.clockGuards[expr.Y] = true
+	}
 	right.clockControlled = scan.clockControlled || clockGuard
 	right.record(expr.Y)
 	scan.pollingFlow = mergePollingFlows(scan.pollingFlow, right.pollingFlow)
