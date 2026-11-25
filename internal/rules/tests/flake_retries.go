@@ -39,19 +39,18 @@ func (c flakeChecks) retriesLoop(body *ast.BlockStmt, post ast.Stmt, parent ast.
 }
 
 func (c flakeChecks) trackRetryBranches(stmt *ast.IfStmt, parent ast.Node, then, otherwise *flakeChecks) {
-	if c.failureCondition(stmt.Cond, false, c.retry.body) && c.exitsAttempt(lastStatement(stmt.Body)) {
+	// A success-only exit leaves the opposite branch available to failed checks.
+	if c.successCondition(stmt.Cond, true, c.retry.body) && c.exitsAttempt(lastStatement(stmt.Body)) {
 		then.successCase = true
 		otherwise.retryFailure = true
 	}
-	if c.failureCondition(stmt.Cond, true, c.retry.body) {
-		if c.exitsAttempt(lastStatement(stmt.Else)) {
-			otherwise.successCase = true
-			then.retryFailure = true
-		}
-		if c.continuesUntilSuccess(stmt, parent) {
-			c.retry.successExit = true
-			then.retryFailure = true
-		}
+	if c.successCondition(stmt.Cond, false, c.retry.body) && c.exitsAttempt(lastStatement(stmt.Else)) {
+		otherwise.successCase = true
+		then.retryFailure = true
+	}
+	if c.failureCondition(stmt.Cond, true, c.retry.body) && c.continuesUntilSuccess(stmt, parent) {
+		c.retry.successExit = true
+		then.retryFailure = true
 	}
 }
 

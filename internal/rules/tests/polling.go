@@ -306,7 +306,7 @@ func (scan *pollingScan) recordLiteral(literal *ast.FuncLit, returns *pollingFlo
 }
 
 func (scan *pollingScan) recordShortCircuit(expr *ast.BinaryExpr) {
-	scan.record(expr.X)
+	clockGuard := scan.recordClockGuard(expr.X)
 	if value := scan.info.Types[expr.X].Value; value != nil {
 		if constant.BoolVal(value) == (expr.Op == token.LAND) {
 			scan.record(expr.Y)
@@ -314,6 +314,7 @@ func (scan *pollingScan) recordShortCircuit(expr *ast.BinaryExpr) {
 		return
 	}
 	right := scan.fork()
+	right.clockControlled = scan.clockControlled || clockGuard
 	right.record(expr.Y)
 	scan.pollingFlow = mergePollingFlows(scan.pollingFlow, right.pollingFlow)
 }

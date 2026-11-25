@@ -834,3 +834,18 @@ func TestSelectOperandsReplaceDeadlineBeforeAnyBody(t *testing.T) {
 		<-ch
 	}
 }
+
+func TestClockShortCircuitDoesNotTaintFollowingAssignments(t *testing.T) {
+	start := time.Now()
+	for range 3 {
+		expired := false
+		_ = time.Since(start) > time.Second && func() bool {
+			expired = true
+			return true
+		}()
+		expired = testing.Short()
+		if expired {
+			break
+		}
+	}
+}

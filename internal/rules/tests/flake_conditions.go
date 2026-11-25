@@ -108,14 +108,23 @@ func (c flakeChecks) retryBooleanCheck(value ast.Expr) bool {
 	return fn != nil && fn.Signature().Recv() == nil
 }
 
-// failureCondition recognizes a check whose success or failure determines this
-// branch. In a retry loop a result must come from inside the loop.
-func (c flakeChecks) failureCondition(condition ast.Expr, failure bool, attempt ast.Node) bool {
+func (c flakeChecks) failureCondition(condition ast.Expr, truth bool, attempt ast.Node) bool {
+	return c.checkCondition(condition, truth, true, attempt)
+}
+
+func (c flakeChecks) successCondition(condition ast.Expr, truth bool, attempt ast.Node) bool {
+	return c.checkCondition(condition, truth, false, attempt)
+}
+
+// checkCondition tests what this branch implies about a check's outcome.
+// In a retry loop a result must come from inside the loop.
+func (c flakeChecks) checkCondition(condition ast.Expr, truth, wantFailure bool, attempt ast.Node) bool {
+	failure := truth == wantFailure
 	switch expr := ast.Unparen(condition).(type) {
 	case *ast.UnaryExpr:
-		return expr.Op == token.NOT && c.failureCondition(expr.X, !failure, attempt)
+		return expr.Op == token.NOT && c.checkCondition(expr.X, !truth, wantFailure, attempt)
 	case *ast.BinaryExpr:
-		return c.failureComparison(expr, failure, attempt)
+		return c.checkComparison(expr, truth, wantFailure, attempt)
 	case *ast.CallExpr:
 		if polarity := c.callOutcomes[expr]; polarity != 0 {
 			if failure {
@@ -149,21 +158,22 @@ func (c flakeChecks) failureCondition(condition ast.Expr, failure bool, attempt 
 	return false
 }
 
-func (c flakeChecks) failureComparison(expr *ast.BinaryExpr, failure bool, attempt ast.Node) bool {
+func (c flakeChecks) checkComparison(expr *ast.BinaryExpr, truth, wantFailure bool, attempt ast.Node) bool {
 	switch expr.Op {
 	case token.LAND, token.LOR:
-		either := (expr.Op == token.LAND) == failure
-		left := c.failureCondition(expr.X, failure, attempt)
-		right := c.failureCondition(expr.Y, failure, attempt)
+		// A true conjunction or false disjunction fixes both operands.
+		either := (expr.Op == token.LAND) == truth
+		left := c.checkCondition(expr.X, truth, wantFailure, attempt)
+		right := c.checkCondition(expr.Y, truth, wantFailure, attempt)
 		if either {
 			return left || right
 		}
 		return left && right
 	case token.EQL, token.NEQ:
 		if operand, same := booleanComparison(c.info, expr); operand != nil {
-			return c.failureCondition(operand, failure == same, attempt)
+			return c.checkCondition(operand, truth == same, wantFailure, attempt)
 		}
-		if (expr.Op == token.NEQ) != failure {
+		if (expr.Op == token.NEQ) != (truth == wantFailure) {
 			return false
 		}
 		return c.errorComparedWithNil(expr.X, expr.Y, attempt) ||

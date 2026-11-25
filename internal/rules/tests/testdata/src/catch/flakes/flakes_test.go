@@ -1165,3 +1165,19 @@ func TestSkipAfterCompoundGuardReassignsStoredFailure(t *test.T) {
 		t.Skip("failed") // want "skipping after a failure"
 	}
 }
+
+func TestRetryUntilSuccessWithIndependentRequirement(t *test.T) {
+	enabled := test.Verbose()
+	for range 3 { // want "retrying a check or test body"
+		if err := check(); err == nil && enabled {
+			break
+		}
+	}
+	for range 3 { // want "retrying a check or test body"
+		if err := check(); !enabled || err != nil {
+			continue
+		} else {
+			break
+		}
+	}
+}

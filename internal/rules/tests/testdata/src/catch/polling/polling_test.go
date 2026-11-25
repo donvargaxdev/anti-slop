@@ -889,3 +889,27 @@ func TestSelectCapturesDeadlineBeforeLaterSendValue(t *testing.T) {
 		}
 	}
 }
+
+func TestClockDisjunctionAndConjunctionSetTimeoutFlag(t *testing.T) {
+	start := Now()
+	for { // want "polling against the wall clock"
+		expired := false
+		_ = Since(start) > Second && func() bool {
+			expired = true
+			return true
+		}()
+		if expired {
+			break
+		}
+	}
+	for { // want "polling against the wall clock"
+		expired := false
+		_ = func() bool { return Since(start) <= Second }() || func() bool {
+			expired = true
+			return false
+		}()
+		if expired {
+			break
+		}
+	}
+}

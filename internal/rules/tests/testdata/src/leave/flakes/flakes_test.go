@@ -1214,3 +1214,20 @@ func TestSkipAfterConjunctiveGuard(t *testing.T) {
 		t.Skip("optional")
 	}
 }
+
+func TestRetryExitCanBeIndependentOfSuccess(t *testing.T) {
+	for range 3 {
+		if err := check(); err == nil || testing.Short() {
+			break
+		}
+	}
+}
+
+func TestFailFastWithAdditionalSuccessRequirement(t *testing.T) {
+	for range 3 {
+		if err := check(); err == nil && testing.Verbose() {
+			break
+		}
+		t.Fatal("failed")
+	}
+}
