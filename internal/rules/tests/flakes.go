@@ -424,6 +424,9 @@ func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, tag ast
 
 func (c *flakeChecks) matchSwitchCases(body *ast.BlockStmt, tag ast.Expr, visit func(flakeChecks, ast.Node, ast.Node) bool) (map[*ast.CaseClause]switchPath, switchPath) {
 	matches := make(map[*ast.CaseClause]switchPath)
+	// The tag is evaluated once, before any case expression can change its operands.
+	tagState := c.fork()
+	var evaluated []ast.Expr
 	var attempt ast.Node
 	if c.retry != nil {
 		attempt = c.retry.body
@@ -438,9 +441,10 @@ func (c *flakeChecks) matchSwitchCases(body *ast.BlockStmt, tag ast.Expr, visit 
 		matched := switchPath{guarded: true}
 		for _, expr := range clause.List {
 			c.walk(expr, visit)
+			evaluated = append(evaluated, expr)
 			branch := c.fork()
-			matchGuard := branch.constrainSwitchCase(tag, expr, true, attempt)
-			missGuard := c.constrainSwitchCase(tag, expr, false, attempt)
+			matchGuard := branch.constrainSwitchCase(tag, expr, true, attempt, tagState, evaluated)
+			missGuard := c.constrainSwitchCase(tag, expr, false, attempt, tagState, evaluated)
 			if c.retry != nil {
 				// If one side proves success, the other can carry a failed attempt.
 				branch.retryFailure = branch.retryFailure || missGuard
@@ -455,23 +459,30 @@ func (c *flakeChecks) matchSwitchCases(body *ast.BlockStmt, tag ast.Expr, visit 
 	return matches, switchPath{flow: c.flakeFlow, guarded: unmatchedGuard}
 }
 
-func (c *flakeChecks) constrainSwitchCase(tag, expr ast.Expr, matches bool, attempt ast.Node) bool {
+func (c *flakeChecks) constrainSwitchCase(tag, expr ast.Expr, matches bool, attempt ast.Node, tagState *flakeChecks, evaluated []ast.Expr) bool {
 	condition, trueOnMatch := c.switchCondition(tag, expr)
 	if condition == nil {
 		// Matching nil proves success. Missing nil proves failure.
-		guarded := matches == (attempt != nil) && c.errorComparedWithNil(tag, expr, attempt)
+		guarded := matches == (attempt != nil) && tagState.errorComparedWithNil(tag, expr, attempt)
 		if c.isNil(expr) {
 			c.constrainError(tag, matches)
 		}
 		return guarded
 	}
 	truth := matches == trueOnMatch
-	guarded := c.failureCondition(condition, truth == (attempt == nil), attempt)
+	guardState := c
+	var later []ast.Expr
+	if condition == tag {
+		guardState = tagState
+		// Only operands that still hold their original values can be narrowed.
+		later = evaluated
+	}
+	guarded := guardState.failureCondition(condition, truth == (attempt == nil), attempt)
 	possible := failsWhenFalse
 	if truth {
 		possible = failsWhenTrue
 	}
-	c.constrainOutcome(condition, possible)
+	c.constrainOutcome(condition, possible, later...)
 	return guarded
 }
 
@@ -541,7 +552,7 @@ func (c *flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int, vis
 			continue
 		}
 		outcomes[i] = c.booleanOutcome(value)
-		if c.retryHeader && outcomes[i] == 0 && c.isCheckCall(value) {
+		if c.retryHeader && outcomes[i] == 0 && c.headerBooleanCheck(value) {
 			outcomes[i] = failsWhenFalse
 		}
 	}

@@ -221,6 +221,27 @@ func waitForReadiness(ready func() bool, state fakeTest) {
 	}
 }
 
+func waitForStoredReadiness(ready func() bool, state fakeTest) {
+	methodReady := false
+	for !methodReady {
+		methodReady = state.Ready()
+	}
+	callbackReady := false
+	for !callbackReady {
+		callbackReady = ready()
+	}
+}
+
+func TestSwitchTagDoesNotAcquireFailureFromCase(t *testing.T) {
+	failed := testing.Short()
+	switch failed {
+	case func() bool { failed = t.Failed(); return false }():
+	case true:
+		t.Skip("short mode")
+	}
+	_ = failed
+}
+
 func TestDistinctSubtestsWithStoredLoopBound(t *testing.T) {
 	for i, name := range []string{"a", "b", "c"} {
 		t.Run(name, func(t *testing.T) {})

@@ -773,6 +773,27 @@ func TestSkipOnBooleanSwitchFailure(t *test.T) {
 	}
 }
 
+func TestSkipOnSwitchFailureBeforeTagVariableIsCleared(t *test.T) {
+	failed := t.Failed()
+	switch failed {
+	case func() bool { failed = false; return false }():
+	case true:
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipAfterSwitchStoresNewFailure(t *test.T) {
+	passed := test.Short()
+	switch passed {
+	case func() bool { passed = !t.Failed(); return false }():
+		return
+	case true:
+		if !passed {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+	}
+}
+
 func TestSkipOnDefaultFailure(t *test.T) {
 	switch {
 	default:
