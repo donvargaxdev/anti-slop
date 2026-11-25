@@ -490,7 +490,7 @@ func (c *flakeChecks) constrainOutcome(condition ast.Expr, possible outcomePolar
 	case *ast.Ident:
 		object := c.info.Uses[expr]
 		polarity := c.outcomes[object]
-		if polarity != shortMode && !c.outcomeReassigned(object, later) {
+		if polarity != shortMode && booleanResult(c.info, expr) && !c.outcomeReassigned(object, later) {
 			c.storeOutcome(expr, restrictBooleanOutcome(polarity, possible))
 		}
 	case *ast.UnaryExpr:

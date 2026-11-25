@@ -127,9 +127,9 @@ func TestRetryAfterReplacingShortMode(t *test.T) {
 	}
 }
 
-func TestRetryAfterConditionallyReplacingShortMode(t *test.T) {
+func TestRetryAfterConditionallyRunningCheck(t *test.T) {
 	for range 3 { // want "retrying a check or test body"
-		passed := test.Short()
+		passed := true
 		if test.Verbose() {
 			passed = checkPassed()
 		}
@@ -510,18 +510,6 @@ func TestRetryWithDeclaredFailure(t *test.T) {
 	}
 }
 
-func TestSkipOnMergedOutcomePolarities(t *test.T) {
-	outcome := t.Failed()
-	if test.Short() {
-		outcome = t.Run("body", body)
-	}
-	if outcome {
-		t.Skip("test failed") // want "skipping after a failure"
-	} else {
-		t.Skip("subtest failed") // want "skipping after a failure"
-	}
-}
-
 func retrySubtest[T any](body func(*T))        {}
 func retryTest[T, C any](ctx C, body func(*T)) {}
 
@@ -578,10 +566,11 @@ func TestSkipAfterFallthrough(t *test.T) {
 	}
 }
 
-func skipAfterSelect(t *test.T, gate <-chan bool) {
+func skipAfterSelect(t *test.T, gate <-chan struct{}) {
 	failed := t.Failed()
 	select {
-	case failed = <-gate:
+	case <-gate:
+		failed = false
 	default:
 	}
 	if failed {
@@ -694,16 +683,6 @@ func skipInReturnedSubtest(t *test.T) bool {
 			t.Skip("failed") // want "skipping after a failure"
 		}
 	})
-}
-
-func TestSkipOnOutcomeWithNewPolarity(t *test.T) {
-	ok := t.Run("subtest", func(t *test.T) {})
-	for range 3 {
-		if ok {
-			t.Skip("failed") // want "skipping after a failure"
-		}
-		ok = !ok
-	}
 }
 
 func TestSkipOnFailureFromContinueAndPost(t *test.T) {
@@ -1201,6 +1180,16 @@ func TestSkipOnFlagClearedAfterFailure(t *test.T) {
 	}
 	if !ready {
 		t.SkipNow() // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnFailedSubtestAfterOptionalReset(t *test.T) {
+	passed := t.Run("body", body)
+	if test.Short() {
+		passed = true
+	}
+	if !passed {
+		t.Skip("failed") // want "skipping after a failure"
 	}
 }
 

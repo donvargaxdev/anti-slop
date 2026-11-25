@@ -1251,3 +1251,66 @@ func TestSkipOnFlagSetForOtherReasons(t *testing.T) {
 		t.Skip("optional")
 	}
 }
+
+func TestSkipOnFailureOrShortMode(t *testing.T) {
+	failed := t.Failed()
+	if testing.Short() {
+		failed = true
+	}
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipOnFailedSubtestOrShortMode(t *testing.T) {
+	passed := t.Run("body", func(t *testing.T) {})
+	if testing.Short() {
+		passed = false
+	}
+	if !passed {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipOnFailureOrIndependentOutcome(t *testing.T) {
+	failed := t.Failed()
+	if testing.Short() {
+		failed = testing.Verbose()
+	}
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipOnMixedOutcomePolarities(t *testing.T) {
+	outcome := t.Failed()
+	if testing.Short() {
+		outcome = t.Run("body", func(t *testing.T) {})
+	}
+	if outcome {
+		t.Skip("optional")
+	} else {
+		t.SkipNow()
+	}
+}
+
+func skipAfterSelectWithIndependentOutcome(t *testing.T, gate <-chan bool) {
+	failed := t.Failed()
+	select {
+	case failed = <-gate:
+	default:
+	}
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipOnAlternatingOutcomePolarity(t *testing.T) {
+	ok := t.Run("subtest", func(t *testing.T) {})
+	for range 3 {
+		if ok {
+			t.Skip("optional")
+		}
+		ok = !ok
+	}
+}
