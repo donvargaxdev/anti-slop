@@ -65,6 +65,32 @@ func pollDeadlineInCondition() {
 	}
 }
 
+func pollWithImmediatePredicate() {
+	start := Now()
+	for (func() bool { return Since(start) < Second })() { // want "polling against the wall clock"
+	}
+	for func() bool { // want "polling against the wall clock"
+		elapsed := func() Duration { return Since(start) }()
+		return elapsed < Second
+	}() {
+	}
+}
+
+func pollWithNamedResult() {
+	for func() (withinBudget bool) { // want "polling against the wall clock"
+		withinBudget = Now().Before(Time{})
+		return
+	}() {
+	}
+}
+
+func pollWithCapturedRefresh() {
+	start := Now()
+	var elapsed Duration
+	for ; func() bool { return elapsed < Second }(); elapsed = Since(start) { // want "polling against the wall clock"
+	}
+}
+
 func pollDeadlineInPost(ready func() bool) {
 	for ; !ready(); <-After(Millisecond) { // want "polling against the wall clock"
 	}

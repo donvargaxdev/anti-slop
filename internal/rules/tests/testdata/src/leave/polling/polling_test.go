@@ -83,6 +83,28 @@ func TestClosureDoesNotReadClockInCondition(t *testing.T) {
 
 func condition(func() time.Time) bool { return false }
 
+func immediatePredicateWithDeferredClockCheck() {
+	for func() bool {
+		defer func() { _ = time.Now() }()
+		return condition(func() time.Time { return time.Now() })
+	}() {
+	}
+}
+
+func immediatePredicateWithUnusedClockSample() {
+	for func() bool {
+		_ = func() time.Time { return time.Now() }()
+		return testing.Short()
+	}() {
+	}
+}
+
+func immediatePredicateWithFixedSnapshot() {
+	now := time.Now()
+	for func() bool { return now.IsZero() }() {
+	}
+}
+
 func TestClockSnapshotAndUnrelatedRefresh(t *testing.T) {
 	end := time.Now()
 	for now := time.Now(); now.Before(end); now = now.Add(time.Second) {

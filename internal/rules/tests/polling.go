@@ -37,9 +37,11 @@ type pollingScan struct {
 	dependsOn     func(ast.Expr, map[types.Object]bool) bool
 	receives      map[*ast.UnaryExpr]bool
 	clockGuards   map[ast.Node]bool
+	clockCalls    map[*ast.CallExpr]bool
 	target        *branchTarget[pollingFlow]
 	continuations *pollingContinuations
 	returns       *pollingFlow
+	result        *types.Var
 }
 
 type pollingFlow struct {
@@ -151,7 +153,7 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 	}
 	switch expr := node.(type) {
 	case *ast.FuncLit:
-		scan.fork().recordLiteral(expr, nil)
+		scan.fork().recordLiteral(expr, nil, nil)
 	case *ast.CallExpr:
 		literal := immediateLiteral(expr, parent)
 		if literal == nil {
@@ -165,11 +167,10 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 		scan.recordShortCircuit(expr)
 	case *ast.IfStmt:
 		scan.record(expr.Init)
-		clockGuard := scan.isClockGuard(expr.Cond)
+		clockGuard := scan.recordClockGuard(expr.Cond)
 		if clockGuard {
 			scan.clockGuards[expr] = true
 		}
-		scan.record(expr.Cond)
 		before := scan.continueCount()
 		other := scan.fork()
 		scan.record(expr.Body)
@@ -178,12 +179,12 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 		scan.markBypassed(clockGuard && scan.continueCount() != before)
 	case *ast.SwitchStmt:
 		scan.record(expr.Init)
-		scan.record(expr.Tag)
-		scan.recordSwitch(expr.Body, label, expr.Tag)
+		tagReadsClock := scan.recordClockGuard(expr.Tag)
+		scan.recordSwitch(expr.Body, label, tagReadsClock)
 	case *ast.TypeSwitchStmt:
 		scan.record(expr.Init)
 		scan.record(expr.Assign)
-		scan.recordSwitch(expr.Body, label, nil)
+		scan.recordSwitch(expr.Body, label, false)
 	case *ast.SelectStmt:
 		scan.recordSelect(expr.Body, label)
 	case *ast.ForStmt:
@@ -199,6 +200,10 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 	case *ast.ReturnStmt:
 		for _, result := range expr.Results {
 			scan.record(result)
+		}
+		if scan.result != nil && len(expr.Results) == 1 {
+			// Merge explicit results the same way as named results on bare returns.
+			scan.store(scan.result, scan.dependsOn(expr.Results[0], scan.tracked))
 		}
 		scan.recordExit()
 		if scan.returns != nil {
@@ -222,7 +227,7 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 	case *ast.ValueSpec:
 		values := scan.values(expr.Values, len(expr.Names))
 		for i, name := range expr.Names {
-			scan.store(name, values[i])
+			scan.store(scan.info.ObjectOf(name), values[i])
 		}
 	case *ast.UnaryExpr:
 		if scan.receives != nil && expr.Op == token.ARROW && afterDeadline(scan.info, expr.X, scan.tracked) {
@@ -254,10 +259,18 @@ func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.Fu
 			body.tracked[params.At(i)] = true
 		}
 	}
+	var result *types.Var
+	if scan.clockCalls != nil && signature.Results().Len() == 1 {
+		result = signature.Results().At(0)
+	}
 	var returns pollingFlow
-	body.recordLiteral(literal, &returns)
+	body.recordLiteral(literal, &returns, result)
 	// Explicit returns and fallthrough both resume the caller.
 	resumed := mergePollingFlows(body.pollingFlow, returns)
+	if result != nil {
+		scan.clockCalls[call] = returns.tracked[result]
+		delete(resumed.tracked, result)
+	}
 	if resumed.tracked == nil {
 		scan.recordExit()
 		scan.stopPath()
@@ -269,11 +282,12 @@ func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.Fu
 	scan.tracked = resumed.tracked
 }
 
-func (scan *pollingScan) recordLiteral(literal *ast.FuncLit, returns *pollingFlow) {
+func (scan *pollingScan) recordLiteral(literal *ast.FuncLit, returns *pollingFlow, result *types.Var) {
 	scan.target = nil
 	scan.continuations = nil
 	scan.bypassed = false
 	scan.returns = returns
+	scan.result = result
 	scan.record(literal.Body)
 }
 
@@ -339,16 +353,18 @@ func (scan *pollingScan) recordSelect(body *ast.BlockStmt, label types.Object) {
 	scan.pollingFlow = mergePollingFlows(scan.pollingFlow, entry.target.breaks)
 }
 
-func (scan *pollingScan) isClockGuard(expr ast.Expr) bool {
-	return scan.clockGuards != nil && scan.dependsOn(expr, scan.tracked)
+func (scan *pollingScan) recordClockGuard(expr ast.Expr) bool {
+	// Read incoming values before the guard runs and returned values after it runs.
+	readsClock := scan.clockCalls != nil && usesClockValue(scan.info, expr, scan.tracked, nil)
+	scan.record(expr)
+	return readsClock || scan.clockCalls != nil && usesClockValue(scan.info, expr, nil, scan.clockCalls)
 }
 
-func (scan *pollingScan) recordSwitch(body *ast.BlockStmt, label types.Object, tag ast.Expr) {
+func (scan *pollingScan) recordSwitch(body *ast.BlockStmt, label types.Object, tagReadsClock bool) {
 	entry := scan.withTarget(label, false)
 	scan.stopPath()
 	var defaultClause *ast.CaseClause
 	var fallingThrough pollingFlow
-	tagReadsClock := entry.isClockGuard(tag)
 	anyClockCase, clockFallthrough := false, false
 	guardedContinue, defaultContinues := false, false
 	for _, stmt := range body.List {
@@ -359,8 +375,7 @@ func (scan *pollingScan) recordSwitch(body *ast.BlockStmt, label types.Object, t
 		branch := entry.fork()
 		caseReadsClock := false
 		for _, expr := range clause.List {
-			caseReadsClock = caseReadsClock || branch.isClockGuard(expr)
-			branch.record(expr)
+			caseReadsClock = branch.recordClockGuard(expr) || caseReadsClock
 		}
 		anyClockCase = anyClockCase || caseReadsClock
 		clockGuard := tagReadsClock || caseReadsClock || clockFallthrough
@@ -440,7 +455,7 @@ func (scan *pollingScan) recordRangeAssignment(stmt *ast.RangeStmt) {
 	// Each iteration replaces the targets with values supplied by the range.
 	for _, target := range targets {
 		if name, ok := ast.Unparen(target).(*ast.Ident); ok {
-			scan.store(name, false)
+			scan.store(scan.info.ObjectOf(name), false)
 		}
 	}
 }
@@ -452,8 +467,9 @@ func (scan *pollingScan) recordAssignment(stmt *ast.AssignStmt) {
 	values := scan.values(stmt.Rhs, len(stmt.Lhs))
 	for i, lhs := range stmt.Lhs {
 		if name, ok := ast.Unparen(lhs).(*ast.Ident); ok {
+			object := scan.info.ObjectOf(name)
 			compound := stmt.Tok != token.ASSIGN && stmt.Tok != token.DEFINE
-			scan.store(name, values[i] || compound && scan.tracked[scan.info.ObjectOf(name)])
+			scan.store(object, values[i] || compound && scan.tracked[object])
 		}
 	}
 }
@@ -470,11 +486,10 @@ func (scan *pollingScan) values(exprs []ast.Expr, count int) []bool {
 	return values
 }
 
-func (scan pollingScan) store(name *ast.Ident, tracked bool) {
+func (scan pollingScan) store(object types.Object, tracked bool) {
 	if scan.tracked == nil {
 		return
 	}
-	object := scan.info.ObjectOf(name)
 	if tracked {
 		scan.tracked[object] = true
 	} else {
@@ -502,7 +517,7 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 	if bounds.maxIterations == 0 {
 		return false
 	}
-	if readsClock(info, condition) {
+	if usesClockValue(info, condition, nil, nil) {
 		return true
 	}
 	if pollsIn(info, condition, receives, nil) || pollsIn(info, post, receives, nil) {
@@ -515,13 +530,15 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 	}
 	// Start with an empty state so a fixed snapshot taken before the loop does
 	// not count as polling. Record each guard with the values that reach it.
+	clockCalls := make(map[*ast.CallExpr]bool)
 	scan := pollingScan{
 		info:        info,
 		pollingFlow: pollingFlow{tracked: make(map[types.Object]bool)},
 		dependsOn: func(expr ast.Expr, tracked map[types.Object]bool) bool {
-			return readsClock(info, expr) || usesTrackedValue(info, expr, tracked)
+			return usesClockValue(info, expr, tracked, clockCalls)
 		},
 		clockGuards:   make(map[ast.Node]bool),
+		clockCalls:    clockCalls,
 		continuations: &pollingContinuations{},
 	}
 	clockInHeader := false
@@ -529,25 +546,20 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 		if rangeLoop != nil {
 			iteration.recordRangeAssignment(rangeLoop)
 		}
-		clockInHeader = clockInHeader || usesTrackedValue(info, condition, iteration.tracked)
+		clockInHeader = iteration.recordClockGuard(condition) || clockInHeader
 	})
 	return clockInHeader || scan.continuations.bypassesExit || pollsIn(info, body, receives, scan.clockGuards)
 }
 
-func usesTrackedValue(info *types.Info, expr ast.Expr, tracked map[types.Object]bool) bool {
+func usesClockValue(info *types.Info, expr ast.Expr, tracked map[types.Object]bool, calls map[*ast.CallExpr]bool) bool {
 	return contains(expr, func(node ast.Node) bool {
-		name, ok := node.(*ast.Ident)
-		return ok && tracked[info.Uses[name]]
-	})
-}
-
-func readsClock(info *types.Info, condition ast.Expr) bool {
-	if condition == nil {
+		switch value := node.(type) {
+		case *ast.Ident:
+			return tracked[info.Uses[value]]
+		case *ast.CallExpr:
+			return calls[value] || packageCall(info, value, "time", "Now", "Since", "Until")
+		}
 		return false
-	}
-	return contains(condition, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		return ok && packageCall(info, call, "time", "Now", "Since", "Until")
 	})
 }
 
