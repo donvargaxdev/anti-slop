@@ -848,3 +848,68 @@ func TestSkipAfterGuardedFallthrough(t *test.T) {
 	}
 	t.Skip("failed") // want "skipping after a failure"
 }
+
+func TestSkipInFailedLoop(t *test.T) {
+	for t.Failed() {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipInStoredFailureLoop(t *test.T) {
+	for passed := t.Run("setup", body); !passed; {
+		t.SkipNow() // want "skipping after a failure"
+	}
+}
+
+func TestSkipAfterImmediateCallRecordsFailure(t *test.T) {
+	failed := false
+	(func() { failed = t.Failed() })()
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipAfterConditionalCallMayLeaveFailure(t *test.T) {
+	failed := t.Failed()
+	_ = test.Short() && func() bool {
+		failed = false
+		return true
+	}()
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipAfterImmediateCallMayReturnWithFailure(t *test.T) {
+	failed := t.Failed()
+	func() {
+		if test.Short() {
+			return
+		}
+		failed = false
+	}()
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipAfterShortCircuitLeavesFailure(t *test.T) {
+	failed := t.Failed()
+	_ = true || func() bool {
+		failed = false
+		return true
+	}()
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestDelayedClosureDoesNotClearFailure(t *test.T) {
+	failed := t.Failed()
+	defer func() { failed = false }()
+	go func() { failed = false }()
+	t.Cleanup(func() { failed = false })
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}

@@ -21,6 +21,7 @@ type flakeChecks struct {
 	info *types.Info
 	flakeFlow
 	target      *branchTarget[flakeFlow]
+	returns     *flakeFlow
 	retryBody   *ast.BlockStmt
 	successCase bool
 	retryHeader bool
@@ -122,6 +123,8 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 			c.walk(stmt.Init, visit)
 			c.walkLoop(label, stmt.Body, stmt.Post, forBounds(c.info, stmt.Cond), visit, func(iteration *flakeChecks) {
 				iteration.walk(stmt.Cond, visit)
+				iteration.failureGuard = iteration.failureGuard || iteration.failureCondition(stmt.Cond, true, nil)
+				iteration.constrainOutcome(stmt.Cond, failsWhenTrue)
 			})
 			return false
 		case *ast.RangeStmt:
@@ -152,6 +155,9 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 			for _, result := range stmt.Results {
 				c.walk(result, visit)
 			}
+			if c.returns != nil {
+				*c.returns = mergeFlakeFlows(*c.returns, c.flakeFlow)
+			}
 			c.outcomes = nil
 			return false
 		case *ast.ExprStmt:
@@ -171,47 +177,80 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 			return false
 		case *ast.FuncLit:
 			body := c.fork()
-			if !calledImmediately(stmt, parents) {
-				body.failureGuard = false
-			}
+			body.failureGuard = false
+			body.returns = nil
 			body.walk(stmt.Body, visit)
 			return false
+		case *ast.CallExpr:
+			if literal := immediateLiteral(stmt, parent); literal != nil {
+				c.walkImmediateCall(stmt, literal, visit)
+				return false
+			}
+		case *ast.BinaryExpr:
+			if stmt.Op == token.LAND || stmt.Op == token.LOR {
+				c.walkShortCircuit(stmt, visit)
+				return false
+			}
 		case *ast.AssignStmt:
-			outcomes := c.assignmentOutcomes(stmt.Rhs, len(stmt.Lhs))
+			for _, lhs := range stmt.Lhs {
+				c.walk(lhs, visit)
+			}
+			outcomes := c.assignmentOutcomes(stmt.Rhs, len(stmt.Lhs), visit)
 			for i, lhs := range stmt.Lhs {
 				if ident, ok := ast.Unparen(lhs).(*ast.Ident); ok {
 					c.storeOutcome(ident, outcomes[i])
 				}
 			}
+			return false
 		case *ast.ValueSpec:
-			outcomes := c.assignmentOutcomes(stmt.Values, len(stmt.Names))
+			outcomes := c.assignmentOutcomes(stmt.Values, len(stmt.Names), visit)
 			for i, name := range stmt.Names {
 				c.storeOutcome(name, outcomes[i])
 			}
+			return false
 		}
 		return true
 	})
 }
 
-func calledImmediately(literal *ast.FuncLit, parents []ast.Node) bool {
-	for i := len(parents) - 1; i >= 0; i-- {
-		if _, ok := parents[i].(*ast.ParenExpr); ok {
-			continue
-		}
-		call, ok := parents[i].(*ast.CallExpr)
-		if !ok || ast.Unparen(call.Fun) != literal {
-			return false
-		}
-		// Only the outer call is delayed. Its arguments are evaluated now.
-		if i > 0 {
-			switch parents[i-1].(type) {
-			case *ast.DeferStmt, *ast.GoStmt:
-				return false
-			}
-		}
-		return true
+func immediateLiteral(call *ast.CallExpr, parent ast.Node) *ast.FuncLit {
+	switch parent.(type) {
+	case *ast.DeferStmt, *ast.GoStmt:
+		return nil
 	}
-	return false
+	literal, _ := ast.Unparen(call.Fun).(*ast.FuncLit)
+	return literal
+}
+
+func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit, visit func(flakeChecks, ast.Node, ast.Node) bool) {
+	for _, arg := range call.Args {
+		c.walk(arg, visit)
+	}
+	if !visit(*c, literal, call) {
+		return
+	}
+	body := c.fork()
+	var returns flakeFlow
+	body.returns = &returns
+	body.walk(literal.Body, visit)
+	// Explicit returns and fallthrough both resume the caller. A testing
+	// termination inside the literal may belong to a different test.
+	if outcomes := mergeOutcomes(returns.outcomes, body.outcomes); outcomes != nil {
+		c.outcomes = outcomes
+	}
+}
+
+func (c *flakeChecks) walkShortCircuit(expr *ast.BinaryExpr, visit func(flakeChecks, ast.Node, ast.Node) bool) {
+	c.walk(expr.X, visit)
+	if value := c.info.Types[expr.X].Value; value != nil {
+		if constant.BoolVal(value) == (expr.Op == token.LAND) {
+			c.walk(expr.Y, visit)
+		}
+		return
+	}
+	right := c.fork()
+	right.walk(expr.Y, visit)
+	c.flakeFlow = mergeFlakeFlows(c.flakeFlow, right.flakeFlow)
 }
 
 func (c flakeChecks) fork() *flakeChecks {
@@ -411,16 +450,20 @@ func mergeOutcomes(dst, src map[types.Object]outcomePolarity) map[types.Object]o
 	return dst
 }
 
-// assignmentOutcomes reads the incoming state before any target is updated.
-func (c flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int) []outcomePolarity {
+// assignmentOutcomes evaluates each operand before any target is updated.
+func (c *flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int, visit func(flakeChecks, ast.Node, ast.Node) bool) []outcomePolarity {
 	outcomes := make([]outcomePolarity, targetCount)
 	if len(values) != targetCount {
+		for _, value := range values {
+			c.walk(value, visit)
+		}
 		if c.retryHeader {
 			c.retryTupleOutcomes(values, outcomes)
 		}
 		return outcomes
 	}
 	for i, value := range values {
+		c.walk(value, visit)
 		if !booleanResult(c.info, value) {
 			if c.retryHeader {
 				outcomes[i] = c.retryErrorOutcome(value)

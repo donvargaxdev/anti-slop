@@ -773,3 +773,87 @@ func TestSkipAfterSwitchWithIndependentMiss(t *testing.T) {
 	}
 	t.Skip("optional")
 }
+
+func TestImmediateCallClearsFailure(t *testing.T) {
+	failed := t.Failed()
+	func() { failed = false }()
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestImmediateCallClearsFailureBeforeReturning(t *testing.T) {
+	failed := t.Failed()
+	func() {
+		failed = false
+		return
+	}()
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestCallbackReturnDoesNotResumeImmediateCaller(t *testing.T) {
+	failed := t.Failed()
+	func() {
+		t.Cleanup(func() { return })
+		failed = false
+	}()
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestAssignmentOverwritesFailureFromImmediateCall(t *testing.T) {
+	failed := false
+	failed = func() bool {
+		failed = t.Failed()
+		return false
+	}()
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestImmediateCallSeesArgumentSideEffects(t *testing.T) {
+	failed := t.Failed()
+	func(bool) {
+		if failed {
+			t.Skip("optional")
+		}
+	}(func() bool {
+		failed = false
+		return true
+	}())
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestImmediateCallRunsAfterTrueAnd(t *testing.T) {
+	failed := t.Failed()
+	_ = true && func() bool {
+		failed = false
+		return true
+	}()
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestEnterLoopOnSuccess(t *testing.T) {
+	passed := t.Run("setup", func(t *testing.T) {})
+	for passed {
+		if !passed {
+			t.Skip("optional")
+		}
+		break
+	}
+}
+
+func TestOptionalSkipAfterFailureLoop(t *testing.T) {
+	for t.Failed() {
+		break
+	}
+	t.Skip("optional")
+}
