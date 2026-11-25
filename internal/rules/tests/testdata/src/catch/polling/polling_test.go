@@ -806,3 +806,20 @@ func TestEarlierSwitchAlternativeMatchesBeforeDeadlineIsReplaced(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectCapturesDeadlineBeforeLaterSendValue(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	sink := make(chan bool, 1)
+	for range 3 { // want "polling against the wall clock"
+		ch := After(Millisecond)
+		select {
+		case <-ch:
+		case sink <- func() bool {
+			ch = ready
+			return true
+		}():
+		default:
+		}
+	}
+}

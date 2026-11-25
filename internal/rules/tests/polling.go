@@ -348,11 +348,17 @@ func (target *branchTarget[T]) destination(info *types.Info, stmt *ast.BranchStm
 
 func (scan *pollingScan) recordSelect(body *ast.BlockStmt, label types.Object) {
 	entry := scan.withTarget(label, false)
+	visitSelectOperands(body, func(expr ast.Expr) { entry.record(expr) })
 	scan.stopPath()
-	// Each clause starts from the same state, and only the selected clause assigns values.
 	for _, stmt := range body.List {
+		clause := stmt.(*ast.CommClause)
 		branch := entry.fork()
-		branch.record(stmt)
+		visitReceiveTargets(clause.Comm, func(expr ast.Expr) { branch.record(expr) }, func(name *ast.Ident) {
+			branch.store(branch.info.ObjectOf(name), false)
+		})
+		for _, bodyStmt := range clause.Body {
+			branch.record(bodyStmt)
+		}
 		scan.pollingFlow = mergePollingFlows(scan.pollingFlow, branch.pollingFlow)
 	}
 	scan.pollingFlow = mergePollingFlows(scan.pollingFlow, entry.target.breaks)

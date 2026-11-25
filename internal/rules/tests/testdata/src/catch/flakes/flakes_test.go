@@ -1000,3 +1000,20 @@ func TestSkipAfterLoopConditionWithBackEdge(t *test.T) {
 	}
 	t.Skip("failed") // want "skipping after a failure"
 }
+
+func TestSelectReceiveTargetRunsOnlyInItsCase(t *test.T) {
+	failed := t.Failed()
+	results := make(chan bool)
+	close(results)
+	destination := make([]bool, 1)
+	select {
+	case destination[func() int {
+		failed = false
+		return 0
+	}()] = <-results:
+	default:
+		if failed {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+	}
+}

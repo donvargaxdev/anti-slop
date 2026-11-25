@@ -353,10 +353,17 @@ func (c *flakeChecks) exitOnFalse(condition ast.Expr) flakeFlow {
 
 func (c *flakeChecks) walkCommunications(body *ast.BlockStmt, label types.Object, visit func(flakeChecks, ast.Node, ast.Node) bool) {
 	entry := c.withTarget(label, false)
+	visitSelectOperands(body, func(expr ast.Expr) { entry.walk(expr, visit) })
 	var exits flakeFlow
-	for _, clause := range body.List {
+	for _, stmt := range body.List {
+		clause := stmt.(*ast.CommClause)
 		branch := entry.fork()
-		branch.walk(clause, visit)
+		visitReceiveTargets(clause.Comm, func(expr ast.Expr) { branch.walk(expr, visit) }, func(name *ast.Ident) {
+			branch.storeOutcome(name, 0)
+		})
+		for _, bodyStmt := range clause.Body {
+			branch.walk(bodyStmt, visit)
+		}
 		exits = mergeFlakeFlows(exits, branch.flakeFlow)
 	}
 	c.flakeFlow = mergeFlakeFlows(exits, entry.target.breaks)

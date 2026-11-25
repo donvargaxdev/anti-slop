@@ -1050,3 +1050,32 @@ func TestSkipAfterLoopConditionCallUsesUpdatedOutcome(t *testing.T) {
 	}
 	t.Skip("optional")
 }
+
+func TestSelectOperandsClearFailureBeforeAnyBody(t *testing.T) {
+	sink := make(chan bool, 1)
+	failed := t.Failed()
+	var replacement bool
+	select {
+	default:
+		if failed {
+			t.Skip("optional")
+		}
+	case replacement = <-func() <-chan bool {
+		replacement = failed
+		return nil
+	}():
+	case func() chan<- bool {
+		failed = false
+		return sink
+	}() <- func() bool {
+		replacement = false
+		return false
+	}():
+		if replacement {
+			t.Skip("optional")
+		}
+	}
+	if failed || replacement {
+		t.Skip("optional")
+	}
+}

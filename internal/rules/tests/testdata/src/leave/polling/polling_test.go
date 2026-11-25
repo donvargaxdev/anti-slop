@@ -749,3 +749,31 @@ func TestSwitchExpressionReplacesDeadlineWithoutDefault(t *testing.T) {
 		<-ch
 	}
 }
+
+func TestSelectOperandsReplaceDeadlineBeforeAnyBody(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	sink := make(chan (<-chan time.Time), 1)
+	ch := time.After(time.Second)
+	var replacement <-chan time.Time
+	select {
+	default:
+		for range 3 {
+			<-ch
+		}
+	case replacement = <-func() <-chan (<-chan time.Time) {
+		replacement = ready
+		return nil
+	}():
+	case sink <- func() <-chan time.Time {
+		ch = replacement
+		return ready
+	}():
+		for range 3 {
+			<-ch
+		}
+	}
+	for range 3 {
+		<-ch
+	}
+}

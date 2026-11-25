@@ -159,6 +159,37 @@ func unlabel(stmt ast.Stmt) ast.Stmt {
 	return stmt
 }
 
+// A select evaluates all communication operands in source order before choosing a clause.
+func visitSelectOperands(body *ast.BlockStmt, visit func(ast.Expr)) {
+	for _, stmt := range body.List {
+		switch comm := stmt.(*ast.CommClause).Comm.(type) {
+		case *ast.SendStmt:
+			visit(comm.Chan)
+			visit(comm.Value)
+		case *ast.ExprStmt:
+			visit(comm.X)
+		case *ast.AssignStmt:
+			visit(comm.Rhs[0])
+		}
+	}
+}
+
+// Only a selected receive assignment evaluates its targets and writes the received values.
+func visitReceiveTargets(comm ast.Stmt, visit func(ast.Expr), clear func(*ast.Ident)) {
+	assignment, ok := comm.(*ast.AssignStmt)
+	if !ok {
+		return
+	}
+	for _, lhs := range assignment.Lhs {
+		visit(lhs)
+	}
+	for _, lhs := range assignment.Lhs {
+		if name, ok := ast.Unparen(lhs).(*ast.Ident); ok {
+			clear(name)
+		}
+	}
+}
+
 // contains checks an expression or statement without entering another function body.
 func contains(root ast.Node, match func(ast.Node) bool) bool {
 	found := false
