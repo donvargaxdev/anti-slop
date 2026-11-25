@@ -570,25 +570,6 @@ func pollsIn(info *types.Info, root ast.Node, receives map[*ast.UnaryExpr]bool, 
 	return found
 }
 
-func invokesLiteral(literal *ast.FuncLit, parents []ast.Node) bool {
-	// Skip parentheses to check whether the literal is the callee.
-	for i := len(parents) - 1; i >= 0; i-- {
-		if _, paren := parents[i].(*ast.ParenExpr); paren {
-			continue
-		}
-		call, ok := parents[i].(*ast.CallExpr)
-		if !ok {
-			break
-		}
-		var enclosing ast.Node
-		if i > 0 {
-			enclosing = parents[i-1]
-		}
-		return immediateLiteral(call, enclosing) == literal
-	}
-	return false
-}
-
 func isFunctionLiteral(node ast.Node) bool {
 	_, ok := node.(*ast.FuncLit)
 	return ok

@@ -85,6 +85,25 @@ func immediateLiteral(call *ast.CallExpr, parent ast.Node) *ast.FuncLit {
 	return literal
 }
 
+func invokesLiteral(literal *ast.FuncLit, parents []ast.Node) bool {
+	// Skip parentheses to check whether the literal is the callee.
+	for i := len(parents) - 1; i >= 0; i-- {
+		if _, paren := parents[i].(*ast.ParenExpr); paren {
+			continue
+		}
+		call, ok := parents[i].(*ast.CallExpr)
+		if !ok {
+			break
+		}
+		var enclosing ast.Node
+		if i > 0 {
+			enclosing = parents[i-1]
+		}
+		return immediateLiteral(call, enclosing) == literal
+	}
+	return false
+}
+
 func packageCall(info *types.Info, call *ast.CallExpr, path string, names ...string) bool {
 	fn := calledFunc(info, call)
 	return fn != nil && fn.Signature().Recv() == nil && namedInPackage(fn, path, names)

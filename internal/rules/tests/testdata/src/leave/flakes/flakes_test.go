@@ -1387,3 +1387,21 @@ func TestSkipWithZeroNamedError(t *testing.T) {
 		return
 	}()
 }
+
+func TestSkipAfterImmediateClosureClearsError(t *testing.T) {
+	err := check()
+	(func() { err = nil })()
+	if err != nil {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipAfterHelperOverwritesFailure(t *testing.T) {
+	failed := t.Failed()
+	forceFlag(&failed)
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func forceFlag(flag *bool) { *flag = true }

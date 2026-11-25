@@ -40,7 +40,7 @@ func isLocalError(variable *types.Var) bool {
 		variable.Pkg() != nil && variable.Parent() != variable.Pkg().Scope()
 }
 
-// Addressed and captured errors can change outside the assignments this walk sees.
+// Addressed errors and captures in delayed closures can change outside this walk.
 func sharedErrorVariables(info *types.Info, file *ast.File) map[types.Object]bool {
 	shared := make(map[types.Object]bool)
 	ast.PreorderStack(file, nil, func(node ast.Node, parents []ast.Node) bool {
@@ -53,8 +53,9 @@ func sharedErrorVariables(info *types.Info, file *ast.File) map[types.Object]boo
 			}
 		case *ast.Ident:
 			if variable, ok := info.Uses[expr].(*types.Var); ok && isLocalError(variable) {
-				for _, parent := range parents {
-					if literal, ok := parent.(*ast.FuncLit); ok && variable.Pos() < literal.Pos() {
+				for i, parent := range parents {
+					if literal, ok := parent.(*ast.FuncLit); ok && variable.Pos() < literal.Pos() &&
+						!invokesLiteral(literal, parents[:i]) {
 						shared[variable] = true
 						break
 					}

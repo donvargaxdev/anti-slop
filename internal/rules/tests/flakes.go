@@ -215,8 +215,10 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 		case *ast.CallExpr:
 			if literal := immediateLiteral(stmt, parent); literal != nil {
 				c.walkImmediateCall(stmt, literal, visit)
-				return false
+			} else {
+				c.walkCall(stmt, parent, visit)
 			}
+			return false
 		case *ast.BinaryExpr:
 			if stmt.Op == token.LAND || stmt.Op == token.LOR {
 				c.walkShortCircuit(stmt, visit)
@@ -248,6 +250,25 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 		}
 		return true
 	})
+}
+
+func (c *flakeChecks) walkCall(call *ast.CallExpr, parent ast.Node, visit func(flakeChecks, ast.Node, ast.Node) bool) {
+	c.walk(call.Fun, visit)
+	for _, arg := range call.Args {
+		c.walk(arg, visit)
+	}
+	callee := c.info.Types[call.Fun]
+	if _, deferred := parent.(*ast.DeferStmt); deferred || callee.IsType() || callee.IsBuiltin() {
+		return
+	}
+	// The call can write through an argument after all arguments are evaluated.
+	for _, arg := range call.Args {
+		if address, ok := ast.Unparen(arg).(*ast.UnaryExpr); ok && address.Op == token.AND {
+			if name, ok := ast.Unparen(address.X).(*ast.Ident); ok {
+				delete(c.outcomes, c.info.Uses[name])
+			}
+		}
+	}
 }
 
 func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit, visit func(flakeChecks, ast.Node, ast.Node) bool) {
