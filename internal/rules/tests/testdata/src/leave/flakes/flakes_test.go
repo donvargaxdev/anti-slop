@@ -214,6 +214,48 @@ func TestFailureConditionWithoutRetry(t *testing.T) {
 	}
 }
 
+func TestSuccessConditionWithErrorsIs(t *testing.T) {
+	err := check()
+	if errors.Is(err, (nil)) {
+		t.Skip("optional")
+	}
+	for errors.Is(check(), nil) {
+	}
+}
+
+func TestErrorsIsAfterHandlingFailure(t *testing.T) {
+	err := check()
+	if !errors.Is(err, nil) {
+		return
+	}
+	if err != nil {
+		t.Skip("optional")
+	}
+	if !errors.Is(err, nil) {
+		t.Skip("optional")
+	}
+}
+
+func TestErrorsIsWithKnownNilError(t *testing.T) {
+	var err error
+	if !errors.Is(err, nil) {
+		if t.Failed() {
+			t.Skip("optional")
+		}
+	}
+}
+
+type concreteError struct{}
+
+func (*concreteError) Error() string { return "failed" }
+
+func TestErrorsIsWithConcreteError(t *testing.T) {
+	var err *concreteError
+	if !errors.Is(err, nil) {
+		t.Skip("optional")
+	}
+}
+
 func waitForReadiness(ready func() bool, state fakeTest) {
 	for !ready() {
 	}

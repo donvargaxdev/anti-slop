@@ -6,6 +6,10 @@ import (
 	"go/types"
 )
 
+func (c flakeChecks) isErrorsIsNil(call *ast.CallExpr) bool {
+	return packageCall(c.info, call, "errors", "Is") && c.isNil(call.Args[1])
+}
+
 func (c flakeChecks) isNil(expr ast.Expr) bool {
 	name, ok := ast.Unparen(expr).(*ast.Ident)
 	return ok && c.info.Uses[name] == types.Universe.Lookup("nil")

@@ -252,6 +252,24 @@ func TestRetryWithClassifiedError(t *test.T) {
 	}
 }
 
+func TestRetryWithNonNilError(t *test.T) {
+	err := check()
+	for !errors.Is(err, nil) { // want "retrying a check or test body"
+		err = check()
+	}
+}
+
+func TestSkipAfterCheckingForNil(t *test.T) {
+	err := check()
+	if !errors.Is(err, nil) {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+	succeeded := errors.Is(check(), nil)
+	if !succeeded {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
 func TestRetryWithDirectCheckAndPostAssignment(t *test.T) {
 	for i := 0; check() != nil; i = i + 1 { // want "retrying a check or test body"
 		t.Log(i)

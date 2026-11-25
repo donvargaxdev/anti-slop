@@ -199,6 +199,7 @@ Feature: Test reliability
       package p_test
 
       import (
+          "errors"
           "strconv"
           "testing"
           "time"
@@ -317,6 +318,12 @@ Feature: Test reliability
       }
 
       func forceFlag(flag *bool) { *flag = true }
+
+      func TestSkipAfterSuccessfulCheck(t *testing.T) {
+          if err := check(); errors.Is(err, nil) {
+              t.Skip("optional")
+          }
+      }
 
       func check() error { return nil }
       """

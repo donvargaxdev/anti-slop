@@ -532,6 +532,10 @@ func (c *flakeChecks) constrainOutcome(condition ast.Expr, possible outcomePolar
 		if expr.Op == token.NOT {
 			c.constrainOutcome(expr.X, possible^(failsWhenTrue|failsWhenFalse), later...)
 		}
+	case *ast.CallExpr:
+		if c.isErrorsIsNil(expr) {
+			c.constrainError(expr.Args[0], possible == failsWhenTrue)
+		}
 	case *ast.BinaryExpr:
 		if (expr.Op == token.LAND && possible == failsWhenTrue) ||
 			(expr.Op == token.LOR && possible == failsWhenFalse) {
