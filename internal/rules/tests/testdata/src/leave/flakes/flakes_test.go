@@ -1488,3 +1488,14 @@ func TestSkipAfterDeferredHelperOverwritesNamedResult(t *testing.T) {
 		t.Skip("optional")
 	}
 }
+
+func TestSkipAfterDeferredHelperOverwritesCapture(t *testing.T) {
+	failed := t.Failed()
+	_ = func() bool {
+		defer forceFlag(&failed)
+		return false
+	}()
+	if failed {
+		t.Skip("optional")
+	}
+}

@@ -294,8 +294,9 @@ func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit
 		}
 	}
 	body.walk(literal.Body, visit)
+	writes := deferredWrites(c.info, literal.Body)
 	if returns.result != nil {
-		if deferMayWriteResult(c.info, literal.Body, returns.result) {
+		if writes[returns.result] {
 			delete(c.callOutcomes, call)
 		} else {
 			c.callOutcomes[call] = returns.booleanOutcome()
@@ -309,6 +310,9 @@ func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit
 		}
 		for result := range results.Variables() {
 			delete(outcomes, result)
+		}
+		for object := range writes {
+			delete(outcomes, object)
 		}
 		forgetCallWrites(c.info, call, nil, outcomes)
 		c.outcomes = outcomes

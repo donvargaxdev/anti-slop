@@ -350,6 +350,14 @@ Feature: Test reliability
           }
       }
 
+      func TestDeferredCaptureWrite(t *testing.T) {
+          failed := t.Failed()
+          func() { defer func() { failed = true }() }()
+          if failed {
+              t.Skip("optional")
+          }
+      }
+
       func check() error { return nil }
       """
     When anti-slop runs with "tests ./..."

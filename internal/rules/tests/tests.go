@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"maps"
 	"strings"
 	"unicode/utf8"
 
@@ -108,26 +109,26 @@ func addressedVariable(info *types.Info, expr ast.Expr) types.Object {
 	return nil
 }
 
-// A defer can change a named result after the return operands are evaluated.
-func deferMayWriteResult(info *types.Info, body *ast.BlockStmt, result *types.Var) bool {
-	if result.Name() == "" {
-		return false
-	}
-	return contains(body, func(node ast.Node) bool {
-		stmt, ok := node.(*ast.DeferStmt)
-		if !ok {
-			return false
-		}
-		if literal, ok := ast.Unparen(stmt.Call.Fun).(*ast.FuncLit); ok && mutableVariables(info, literal.Body)[result] {
-			return true
-		}
-		for _, arg := range stmt.Call.Args {
-			if addressedVariable(info, arg) == result {
-				return true
+// deferredWrites identifies variables that a function's defers may change on exit.
+func deferredWrites(info *types.Info, body *ast.BlockStmt) map[types.Object]bool {
+	writes := make(map[types.Object]bool)
+	ast.PreorderStack(body, nil, func(node ast.Node, _ []ast.Node) bool {
+		switch stmt := node.(type) {
+		case *ast.FuncLit:
+			return false // Its defers belong to a separate call.
+		case *ast.DeferStmt:
+			if literal, ok := ast.Unparen(stmt.Call.Fun).(*ast.FuncLit); ok {
+				maps.Copy(writes, mutableVariables(info, literal.Body))
+			}
+			for _, arg := range stmt.Call.Args {
+				if object := addressedVariable(info, arg); object != nil {
+					writes[object] = true
+				}
 			}
 		}
-		return false
+		return true
 	})
+	return writes
 }
 
 func invokesLiteral(literal *ast.FuncLit, parents []ast.Node) bool {
