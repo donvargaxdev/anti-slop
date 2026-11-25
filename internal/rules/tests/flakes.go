@@ -52,11 +52,12 @@ func runFlakes(pass *analysis.Pass) (any, error) {
 func (c flakeChecks) reportFinding(node ast.Node, reportOnce func(ast.Node, string)) {
 	switch stmt := node.(type) {
 	case *ast.ForStmt:
-		if c.retriesInHeader(stmt) || c.retriesLoop(stmt.Body) {
+		if forBounds(c.info, stmt.Cond).maxIterations != 0 && (c.retriesInHeader(stmt) || c.retriesLoop(stmt.Body)) {
 			reportOnce(stmt, "retrying a check or test body")
 		}
 	case *ast.RangeStmt:
-		if c.retriesLoop(stmt.Body) {
+		maxIterations := rangeBounds(c.info, stmt.X).maxIterations
+		if (maxIterations == unknownIterations || maxIterations > 1) && c.retriesLoop(stmt.Body) {
 			reportOnce(stmt, "retrying a check or test body")
 		}
 	case *ast.IfStmt:
@@ -115,13 +116,13 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 		switch stmt := node.(type) {
 		case *ast.ForStmt:
 			c.walk(stmt.Init, visit)
-			c.walkLoop(label, stmt.Body, stmt.Post, forMaySkip(c.info, stmt.Cond), visit, func(iteration *flakeChecks) {
+			c.walkLoop(label, stmt.Body, stmt.Post, forBounds(c.info, stmt.Cond), visit, func(iteration *flakeChecks) {
 				iteration.walk(stmt.Cond, visit)
 			})
 			return false
 		case *ast.RangeStmt:
 			c.walk(stmt.X, visit)
-			c.walkLoop(label, stmt.Body, nil, rangeMayBeEmpty(c.info, stmt.X), visit, func(iteration *flakeChecks) {
+			c.walkLoop(label, stmt.Body, nil, rangeBounds(c.info, stmt.X), visit, func(iteration *flakeChecks) {
 				for _, target := range [...]ast.Expr{stmt.Key, stmt.Value} {
 					iteration.walk(target, visit)
 					if name, ok := ast.Unparen(target).(*ast.Ident); ok {
@@ -202,9 +203,12 @@ func (c *flakeChecks) recordBranch(stmt *ast.BranchStmt) {
 	c.outcomes = nil
 }
 
-func (c *flakeChecks) walkLoop(label types.Object, body *ast.BlockStmt, post ast.Stmt, maySkip bool, visit func(flakeChecks, ast.Node, ast.Node) bool, beforeBody func(*flakeChecks)) {
+func (c *flakeChecks) walkLoop(label types.Object, body *ast.BlockStmt, post ast.Stmt, bounds loopBounds, visit func(flakeChecks, ast.Node, ast.Node) bool, beforeBody func(*flakeChecks)) {
+	if bounds.maxIterations == 0 {
+		return
+	}
 	entry := c.withTarget(label, true)
-	for {
+	for count := int64(1); ; count++ {
 		iteration := entry.fork()
 		beforeBody(iteration)
 		iteration.walk(body, visit)
@@ -213,9 +217,9 @@ func (c *flakeChecks) walkLoop(label types.Object, body *ast.BlockStmt, post ast
 		iteration.walk(post, visit)
 		// The next iteration can also start with values from the first entry.
 		next := mergeOutcomes(maps.Clone(entry.outcomes), iteration.outcomes)
-		if maps.Equal(entry.outcomes, next) {
+		if count == bounds.maxIterations || maps.Equal(entry.outcomes, next) {
 			exits := mergeOutcomes(iteration.outcomes, entry.target.breaks)
-			if maySkip {
+			if bounds.maySkip {
 				exits = mergeOutcomes(exits, c.outcomes)
 			}
 			c.outcomes = exits

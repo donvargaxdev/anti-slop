@@ -451,3 +451,14 @@ func TestSkipOnFailureFromContinueAndPost(t *test.T) {
 		failed = false
 	}
 }
+
+func TestFailureRecordedOnFinalIteration(t *test.T) {
+	failed := false
+	for range 1 {
+		failed = t.Failed()
+		continue
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}

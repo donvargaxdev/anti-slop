@@ -401,3 +401,22 @@ func TestRangeOverwritesFailureFromPreviousIteration(t *testing.T) {
 		failed = t.Failed()
 	}
 }
+
+func TestFailureRecordedOnOnlyIteration(t *testing.T) {
+	failed := false
+	for range 1 {
+		if failed {
+			t.Skip("optional")
+		}
+		failed = t.Failed()
+	}
+}
+
+func singleAttempt() {
+	for range [1]int{} {
+		if check() != nil {
+			continue
+		}
+		break
+	}
+}

@@ -489,3 +489,48 @@ func TestPollWithSamplePassedAcrossIterations(t *testing.T) {
 		elapsed, sample = sample, Since(start)
 	}
 }
+
+func TestPollUntilSwitchFatal(t *testing.T) {
+	start := Now()
+	for { // want "polling against the wall clock"
+		switch {
+		case Since(start) > Second:
+			t.Fatal("timeout")
+		default:
+		}
+	}
+}
+
+func TestPollUntilSwitchLabeledBreak(t *testing.T) {
+	start := Now()
+poll:
+	for { // want "polling against the wall clock"
+		switch elapsed := Since(start); elapsed > Second {
+		case true:
+			break poll
+		}
+	}
+}
+
+func TestPollUntilSwitchDefault(t *testing.T) {
+	start := Now()
+	for { // want "polling against the wall clock"
+		switch {
+		default:
+			return
+		case Since(start) <= Second:
+		}
+	}
+}
+
+func TestPollUntilSwitchFallthrough(t *testing.T) {
+	start := Now()
+	for { // want "polling against the wall clock"
+		switch {
+		case Since(start) > Second:
+			fallthrough
+		case testing.Short():
+			t.FailNow()
+		}
+	}
+}

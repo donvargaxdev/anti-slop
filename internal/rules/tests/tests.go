@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/types"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/tools/go/analysis"
 )
@@ -101,18 +102,35 @@ func report(pass *analysis.Pass, node ast.Node, reason string) {
 	pass.Report(analysis.Diagnostic{Pos: node.Pos(), Category: "tests", Message: reason})
 }
 
-func forMaySkip(info *types.Info, cond ast.Expr) bool {
-	value := info.Types[cond].Value
-	return cond != nil && (value == nil || !constant.BoolVal(value))
+const unknownIterations = -1
+
+type loopBounds struct {
+	maxIterations int64
+	maySkip       bool
 }
 
-func rangeMayBeEmpty(info *types.Info, expr ast.Expr) bool {
+func forBounds(info *types.Info, cond ast.Expr) loopBounds {
+	value := info.Types[cond].Value
+	if value != nil && !constant.BoolVal(value) {
+		return loopBounds{maySkip: true}
+	}
+	return loopBounds{maxIterations: unknownIterations, maySkip: cond != nil && value == nil}
+}
+
+func rangeBounds(info *types.Info, expr ast.Expr) loopBounds {
 	if value := info.Types[expr].Value; value != nil {
 		switch value.Kind() {
 		case constant.Int:
-			return constant.Sign(value) <= 0
+			if constant.Sign(value) <= 0 {
+				return loopBounds{maySkip: true}
+			}
+			if count, exact := constant.Int64Val(value); exact {
+				return loopBounds{maxIterations: count}
+			}
+			return loopBounds{maxIterations: unknownIterations}
 		case constant.String:
-			return constant.StringVal(value) == ""
+			count := utf8.RuneCountInString(constant.StringVal(value))
+			return loopBounds{maxIterations: int64(count), maySkip: count == 0}
 		}
 	}
 	underlying := info.TypeOf(expr).Underlying()
@@ -120,9 +138,9 @@ func rangeMayBeEmpty(info *types.Info, expr ast.Expr) bool {
 		underlying = pointer.Elem().Underlying()
 	}
 	if array, ok := underlying.(*types.Array); ok {
-		return array.Len() == 0
+		return loopBounds{maxIterations: array.Len(), maySkip: array.Len() == 0}
 	}
-	return true
+	return loopBounds{maxIterations: unknownIterations, maySkip: true}
 }
 
 func unlabel(stmt ast.Stmt) ast.Stmt {

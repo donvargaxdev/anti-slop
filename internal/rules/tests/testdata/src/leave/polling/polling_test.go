@@ -408,3 +408,43 @@ func TestRangeOverwritesClockSampleFromPreviousIteration(t *testing.T) {
 		elapsed = time.Since(start)
 	}
 }
+
+func receiveBeforeSettingDeadline(ready <-chan time.Time) {
+	ch := ready
+	for range 1 {
+		<-ch
+		ch = time.After(time.Second)
+	}
+}
+
+func receiveBeforeDeadlineCanReachIt(ready <-chan time.Time) {
+	ch, next := ready, ready
+	for range 2 {
+		<-ch
+		ch, next = next, time.After(time.Second)
+	}
+}
+
+func TestClockSampleAssignedOnOnlyIteration(t *testing.T) {
+	start := time.Now()
+	var elapsed time.Duration
+	for range "é" {
+		if elapsed > time.Second {
+			t.Fatal("timeout")
+		}
+		elapsed = time.Since(start)
+	}
+}
+
+func TestClockSwitchWithLocalBreak(t *testing.T) {
+	start := time.Now()
+	for {
+		switch {
+		case time.Since(start) > time.Second:
+			t.Log("slow")
+			break
+		case testing.Short():
+			return
+		}
+	}
+}
