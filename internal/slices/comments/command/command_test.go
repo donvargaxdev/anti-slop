@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/donvargaxdev/anti-slop/internal/cli"
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port/porttest"
 	"github.com/donvargaxdev/anti-slop/internal/slices/comments/command"
-	"github.com/donvargaxdev/anti-slop/internal/slices/comments/port"
-	"github.com/donvargaxdev/anti-slop/internal/slices/comments/port/porttest"
 )
 
 func ui() (*cli.UI, *bytes.Buffer, *bytes.Buffer) {

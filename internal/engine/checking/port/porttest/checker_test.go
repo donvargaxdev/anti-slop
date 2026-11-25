@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/donvargaxdev/anti-slop/internal/slices/comments/port"
-	"github.com/donvargaxdev/anti-slop/internal/slices/comments/port/porttest"
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port/porttest"
 )
 
 func TestTheFakeHoldsTheContract(t *testing.T) {
