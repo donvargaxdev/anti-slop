@@ -841,6 +841,27 @@ func TestDeferredCallDoesNotReplaceDeadline(t *testing.T) {
 	}
 }
 
+func TestDeferredReceiveFromUnchangedDeadline(t *testing.T) {
+	ch := After(Second)
+	defer func() {
+		for range 3 { // want "polling against the wall clock"
+			<-ch
+		}
+	}()
+}
+
+func TestImmediateReceiveBeforeDeadlineReplacement(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	ch := After(Second)
+	func() {
+		for range 3 { // want "polling against the wall clock"
+			<-ch
+		}
+	}()
+	ch = ready
+}
+
 func TestShortCircuitedCallDoesNotReplaceDeadline(t *testing.T) {
 	ready := make(chan Time)
 	close(ready)

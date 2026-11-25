@@ -201,6 +201,7 @@ Feature: Test reliability
       import (
           "strconv"
           "testing"
+          "time"
       )
 
       func TestProbe(t *testing.T) {
@@ -264,6 +265,18 @@ Feature: Test reliability
               }
           }()
           failed = true
+      }
+
+      func TestDeferredReceiveAfterOverwrite(t *testing.T) {
+          ready := make(chan time.Time)
+          close(ready)
+          ch := time.After(time.Second)
+          defer func() {
+              for range 3 {
+                  <-ch
+              }
+          }()
+          ch = ready
       }
 
       func TestSkipWithZeroNamedError(t *testing.T) {

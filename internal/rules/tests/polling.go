@@ -35,6 +35,7 @@ type pollingScan struct {
 	info *types.Info
 	pollingFlow
 	dependsOn       func(ast.Expr, map[types.Object]bool) bool
+	mutableVars     map[types.Object]bool
 	receives        map[*ast.UnaryExpr]bool
 	clockGuards     map[ast.Node]bool
 	callResults     map[*ast.CallExpr]bool
@@ -68,12 +69,17 @@ type branchTarget[T any] struct {
 
 func deadlineReceives(pass *analysis.Pass) map[*ast.UnaryExpr]bool {
 	callResults := make(map[*ast.CallExpr]bool)
+	mutableVars := make(map[types.Object]bool)
+	for _, file := range pass.Files {
+		maps.Copy(mutableVars, mutableVariables(pass.TypesInfo, file))
+	}
 	scan := pollingScan{
 		info:        pass.TypesInfo,
 		pollingFlow: pollingFlow{tracked: make(map[types.Object]bool)},
 		dependsOn: func(expr ast.Expr, tracked map[types.Object]bool) bool {
 			return afterDeadline(pass.TypesInfo, expr, tracked, callResults)
 		},
+		mutableVars: mutableVars,
 		receives:    make(map[*ast.UnaryExpr]bool),
 		callResults: callResults,
 	}
@@ -158,6 +164,12 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 	case *ast.FuncLit:
 		body := scan.fork()
 		body.clockControlled = false
+		// A delayed closure can observe writes made after it was created.
+		for object := range body.tracked {
+			if body.mutableVars[object] {
+				delete(body.tracked, object)
+			}
+		}
 		body.recordLiteral(expr, nil, nil)
 	case *ast.CallExpr:
 		literal := immediateLiteral(expr, parent)

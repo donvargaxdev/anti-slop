@@ -858,3 +858,15 @@ func TestClockOnRightOfShortCircuit(t *testing.T) {
 		}() && time.Now().IsZero()
 	}
 }
+
+func TestDeferredReceiveAfterDeadlineReplacement(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	defer func() {
+		for range 3 {
+			<-ch
+		}
+	}()
+	ch = ready
+}
