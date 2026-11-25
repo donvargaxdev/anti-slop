@@ -98,7 +98,7 @@ func (c flakeChecks) isCheckCall(value ast.Expr) bool {
 	return ok && !c.info.Types[call.Fun].IsType()
 }
 
-func (c flakeChecks) headerBooleanCheck(value ast.Expr) bool {
+func (c flakeChecks) retryBooleanCheck(value ast.Expr) bool {
 	call, ok := ast.Unparen(value).(*ast.CallExpr)
 	if !ok {
 		return false
@@ -132,8 +132,7 @@ func (c flakeChecks) failureCondition(condition ast.Expr, failure bool, attempt 
 		case testingMethod(c.info, expr, "Run"):
 			return !failure
 		case attempt != nil || c.retry != nil:
-			return !failure && c.isCheckCall(expr) && booleanResult(c.info, expr) && !c.isShortMode(expr) &&
-				(!c.retryHeader || c.headerBooleanCheck(expr))
+			return !failure && c.retryBooleanCheck(expr) && booleanResult(c.info, expr) && !c.isShortMode(expr)
 		}
 	case *ast.Ident:
 		polarity := c.outcomes[c.info.ObjectOf(expr)]

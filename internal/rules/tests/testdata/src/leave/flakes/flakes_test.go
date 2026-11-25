@@ -232,6 +232,25 @@ func waitForStoredReadiness(ready func() bool, state fakeTest) {
 	}
 }
 
+func waitForReadinessInBody(ready func() bool, state fakeTest) {
+	for {
+		if ready() {
+			break
+		}
+	}
+	for {
+		if state.Ready() {
+			break
+		}
+	}
+	for {
+		passed := ready()
+		if passed {
+			break
+		}
+	}
+}
+
 func TestSwitchTagDoesNotAcquireFailureFromCase(t *testing.T) {
 	failed := testing.Short()
 	switch failed {

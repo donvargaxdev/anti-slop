@@ -730,6 +730,33 @@ func TestDelayedCallsDoNotPollEnclosingLoop(t *testing.T) {
 	}
 }
 
+func TestClockControlledFlagIsReplacedBeforeExit(t *testing.T) {
+	start := time.Now()
+	for range 3 {
+		expired := false
+		if time.Since(start) > time.Second {
+			expired = true
+		}
+		expired = testing.Short()
+		if expired {
+			break
+		}
+	}
+}
+
+func TestUncalledClosureDoesNotSetTimeoutFlag(t *testing.T) {
+	start := time.Now()
+	for range 3 {
+		expired := false
+		if time.Since(start) > time.Second {
+			_ = func() { expired = true }
+		}
+		if expired {
+			break
+		}
+	}
+}
+
 func TestClockGuardOnlyReturnsFromImmediateCall(t *testing.T) {
 	start := time.Now()
 	for range 3 {

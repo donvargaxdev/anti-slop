@@ -778,6 +778,33 @@ func TestReceiveStoredDeadlineReturnedByImmediateCall(t *testing.T) {
 	}
 }
 
+func TestClockGuardSetsTimeoutFlag(t *testing.T) {
+	start := Now()
+	for { // want "polling against the wall clock"
+		expired := false
+		if Since(start) > Second {
+			expired = true
+		}
+		if expired {
+			break
+		}
+	}
+}
+
+func TestClockSwitchSetsTimeoutFlagInImmediateCall(t *testing.T) {
+	start := Now()
+	for { // want "polling against the wall clock"
+		expired := false
+		switch {
+		case Since(start) > Second:
+			func() { expired = true }()
+		}
+		if expired {
+			break
+		}
+	}
+}
+
 func TestClockGuardInsideImmediateCall(t *testing.T) {
 	start := Now()
 	for range 3 { // want "polling against the wall clock"

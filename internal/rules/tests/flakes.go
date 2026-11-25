@@ -555,7 +555,7 @@ func (c *flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int, vis
 			continue
 		}
 		outcomes[i] = c.booleanOutcome(value)
-		if c.retryHeader && outcomes[i] == 0 && c.headerBooleanCheck(value) {
+		if c.retryHeader && outcomes[i] == 0 && c.retryBooleanCheck(value) {
 			outcomes[i] = failsWhenFalse
 		}
 	}

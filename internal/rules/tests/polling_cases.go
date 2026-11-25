@@ -23,7 +23,7 @@ func (scan *pollingScan) recordSwitch(body *ast.BlockStmt, label types.Object, t
 		branch := *entry
 		branch.pollingFlow = matched.flow
 		clockGuard := tagReadsClock || matched.readsClock || clockFallthrough
-		branch.returnGuard = entry.returnGuard || clockGuard
+		branch.clockControlled = entry.clockControlled || clockGuard
 		if clockGuard {
 			scan.clockGuards[clause] = true
 		}

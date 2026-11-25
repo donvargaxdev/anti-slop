@@ -34,15 +34,15 @@ func runPolling(pass *analysis.Pass) (any, error) {
 type pollingScan struct {
 	info *types.Info
 	pollingFlow
-	dependsOn     func(ast.Expr, map[types.Object]bool) bool
-	receives      map[*ast.UnaryExpr]bool
-	clockGuards   map[ast.Node]bool
-	callResults   map[*ast.CallExpr]bool
-	target        *branchTarget[pollingFlow]
-	continuations *pollingContinuations
-	returns       *pollingFlow
-	result        *types.Var
-	returnGuard   bool
+	dependsOn       func(ast.Expr, map[types.Object]bool) bool
+	receives        map[*ast.UnaryExpr]bool
+	clockGuards     map[ast.Node]bool
+	callResults     map[*ast.CallExpr]bool
+	target          *branchTarget[pollingFlow]
+	continuations   *pollingContinuations
+	returns         *pollingFlow
+	result          *types.Var
+	clockControlled bool
 }
 
 type pollingFlow struct {
@@ -156,7 +156,9 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 	}
 	switch expr := node.(type) {
 	case *ast.FuncLit:
-		scan.fork().recordLiteral(expr, nil, nil)
+		body := scan.fork()
+		body.clockControlled = false
+		body.recordLiteral(expr, nil, nil)
 	case *ast.CallExpr:
 		literal := immediateLiteral(expr, parent)
 		if literal == nil {
@@ -175,12 +177,12 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 			scan.clockGuards[expr] = true
 		}
 		before := scan.continueCount()
-		outerReturnGuard := scan.returnGuard
-		scan.returnGuard = outerReturnGuard || clockGuard
+		outerControl := scan.clockControlled
+		scan.clockControlled = outerControl || clockGuard
 		other := scan.fork()
 		scan.record(expr.Body)
 		other.record(expr.Else)
-		scan.returnGuard = outerReturnGuard
+		scan.clockControlled = outerControl
 		scan.pollingFlow = mergePollingFlows(scan.pollingFlow, other.pollingFlow)
 		scan.markBypassed(clockGuard && scan.continueCount() != before)
 	case *ast.SwitchStmt:
@@ -212,8 +214,7 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 			if len(expr.Results) == 1 {
 				dependsOnClock = scan.dependsOn(expr.Results[0], scan.tracked)
 			}
-			// A clock guard can select this return even if its value is constant.
-			scan.store(scan.result, scan.returnGuard || dependsOnClock)
+			scan.store(scan.result, dependsOnClock)
 		}
 		scan.recordExit()
 		if scan.returns != nil {
@@ -301,7 +302,6 @@ func (scan *pollingScan) recordLiteral(literal *ast.FuncLit, returns *pollingFlo
 	scan.bypassed = false
 	scan.returns = returns
 	scan.result = result
-	scan.returnGuard = false
 	scan.record(literal.Body)
 }
 
@@ -433,7 +433,8 @@ func (scan pollingScan) store(object types.Object, tracked bool) {
 	if scan.tracked == nil {
 		return
 	}
-	if tracked {
+	// A clock guard can select which value is stored even if it is constant.
+	if tracked || scan.clockControlled {
 		scan.tracked[object] = true
 	} else {
 		delete(scan.tracked, object)
