@@ -139,10 +139,14 @@ func (scan *deadlineScan) visit(node ast.Node) bool {
 		scan.record(expr.Init)
 		condition := scan.info.Types[expr.Cond].Value
 		maySkip := expr.Cond != nil && (condition == nil || !constant.BoolVal(condition))
-		scan.recordLoop(label, maySkip, expr.Body, expr.Post, expr.Cond)
+		scan.recordLoop(label, maySkip, expr.Body, expr.Post, func(iteration *deadlineScan) {
+			iteration.record(expr.Cond)
+		})
 	case *ast.RangeStmt:
 		scan.record(expr.X)
-		scan.recordLoop(label, scan.rangeMayBeEmpty(expr.X), expr.Body, nil, expr.Key, expr.Value)
+		scan.recordLoop(label, scan.rangeMayBeEmpty(expr.X), expr.Body, nil, func(iteration *deadlineScan) {
+			iteration.recordRangeAssignment(expr)
+		})
 	case *ast.BranchStmt:
 		switch expr.Tok {
 		case token.BREAK, token.CONTINUE:
@@ -255,13 +259,11 @@ func (scan deadlineScan) rangeMayBeEmpty(expr ast.Expr) bool {
 	return true
 }
 
-func (scan *deadlineScan) recordLoop(label types.Object, maySkip bool, body *ast.BlockStmt, post ast.Stmt, beforeBody ...ast.Node) {
+func (scan *deadlineScan) recordLoop(label types.Object, maySkip bool, body *ast.BlockStmt, post ast.Stmt, beforeBody func(*deadlineScan)) {
 	entry := scan.withTarget(label, true)
 	for {
 		iteration := entry.fork()
-		for _, node := range beforeBody {
-			iteration.record(node)
-		}
+		beforeBody(iteration)
 		iteration.record(body)
 		// A continue bypasses the rest of the body and still runs the post statement.
 		iteration.channels = mergeDeadlines(iteration.channels, entry.target.continues)
@@ -278,6 +280,19 @@ func (scan *deadlineScan) recordLoop(label types.Object, maySkip bool, body *ast
 			// Break paths bypass the remaining body and post statement.
 			scan.channels = mergeDeadlines(scan.channels, entry.target.breaks)
 			return
+		}
+	}
+}
+
+func (scan deadlineScan) recordRangeAssignment(stmt *ast.RangeStmt) {
+	targets := [...]ast.Expr{stmt.Key, stmt.Value}
+	for _, target := range targets {
+		scan.record(target)
+	}
+	// Each iteration replaces the targets with values supplied by the range.
+	for _, target := range targets {
+		if name, ok := ast.Unparen(target).(*ast.Ident); ok {
+			scan.store(name, false)
 		}
 	}
 }

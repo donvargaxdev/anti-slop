@@ -207,6 +207,35 @@ func TestSkipOnDeclaredFailure(t *test.T) {
 	}
 }
 
+func TestSkipOnFailureBeforeCleanup(t *test.T) {
+	failed := t.Failed()
+	t.Cleanup(func() { failed = false })
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnCapturedFailure(t *test.T) {
+	failed := t.Failed()
+	t.Cleanup(func() {
+		if failed {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+	})
+}
+
+func TestSkipOnSwappedOutcome(t *test.T) {
+	failed := t.Failed()
+	other := false
+	failed, other = other, failed
+	if other {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+	if failed {
+		t.Skip("independent condition")
+	}
+}
+
 func TestRetryWithDeclaredFailure(t *test.T) {
 	for range 3 { // want "retrying a check or test body"
 		var failed, _ = !t.Run("body", body), true

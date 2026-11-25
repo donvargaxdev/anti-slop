@@ -102,37 +102,53 @@ func (c flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.N
 			return false
 		}
 		switch stmt := node.(type) {
+		case *ast.FuncLit:
+			body := c
+			body.outcomes = maps.Clone(c.outcomes)
+			body.walk(stmt.Body, visit)
+			return false
 		case *ast.AssignStmt:
+			outcomes := c.assignmentOutcomes(stmt.Rhs, len(stmt.Lhs))
 			for i, lhs := range stmt.Lhs {
-				if ident, ok := lhs.(*ast.Ident); ok {
-					c.rememberOutcome(ident, stmt.Rhs, i, len(stmt.Lhs))
+				if ident, ok := ast.Unparen(lhs).(*ast.Ident); ok {
+					c.storeOutcome(ident, outcomes[i])
 				}
 			}
 		case *ast.ValueSpec:
+			outcomes := c.assignmentOutcomes(stmt.Values, len(stmt.Names))
 			for i, name := range stmt.Names {
-				c.rememberOutcome(name, stmt.Values, i, len(stmt.Names))
+				c.storeOutcome(name, outcomes[i])
 			}
 		}
 		return true
 	})
 }
 
-// rememberOutcome follows simple assignments and declarations of testing status in a
-// variable so retry and skip checks can use the stored result's polarity.
-func (c flakeChecks) rememberOutcome(name *ast.Ident, values []ast.Expr, index, nameCount int) {
+// assignmentOutcomes reads the incoming state before any target is updated.
+func (c flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int) []outcomePolarity {
+	outcomes := make([]outcomePolarity, targetCount)
+	if len(values) != targetCount {
+		return outcomes
+	}
+	for i, value := range values {
+		if !booleanResult(c.info, value) {
+			continue
+		}
+		if c.failureCondition(value, true, nil) {
+			outcomes[i] |= failsWhenTrue
+		}
+		if c.failureCondition(value, false, nil) {
+			outcomes[i] |= failsWhenFalse
+		}
+	}
+	return outcomes
+}
+
+func (c flakeChecks) storeOutcome(name *ast.Ident, polarity outcomePolarity) {
 	if name.Name == "_" {
 		return
 	}
 	object := c.info.ObjectOf(name)
-	var polarity outcomePolarity
-	if len(values) == nameCount && booleanResult(c.info, values[index]) {
-		if c.failureCondition(values[index], true, nil) {
-			polarity |= failsWhenTrue
-		}
-		if c.failureCondition(values[index], false, nil) {
-			polarity |= failsWhenFalse
-		}
-	}
 	if polarity == 0 {
 		delete(c.outcomes, object)
 	} else {

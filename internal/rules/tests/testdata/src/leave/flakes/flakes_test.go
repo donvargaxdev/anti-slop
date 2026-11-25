@@ -163,6 +163,14 @@ func TestSkipOnOverwrittenOutcome(t *testing.T) {
 	}
 }
 
+func TestSkipBeforeCleanupAssignsFailure(t *testing.T) {
+	skip := testing.Short()
+	t.Cleanup(func() { skip = t.Failed() })
+	if skip {
+		t.Skip("optional test")
+	}
+}
+
 func TestStopOnStoredFailure(t *testing.T) {
 	outcome := t.Run("setup", func(t *testing.T) {})
 	for i := range 3 {

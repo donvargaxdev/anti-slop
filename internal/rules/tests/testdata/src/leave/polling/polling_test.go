@@ -205,6 +205,27 @@ func TestDeadlineReassignedOnBothBranches(t *testing.T) {
 	}
 }
 
+func TestDeadlineReassignedByRangeValue(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Millisecond)
+	for _, ch = range [1]<-chan time.Time{ready} {
+		<-ch
+	}
+	for range 1 {
+		<-ch
+	}
+}
+
+func TestDeadlineReassignedByRangeKey(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Millisecond)
+	for ch = range map[<-chan time.Time]bool{ready: true} {
+		<-ch
+	}
+}
+
 func TestDeadlineReassignedOnEverySwitchCase(t *testing.T) {
 	ready := make(chan time.Time)
 	close(ready)
