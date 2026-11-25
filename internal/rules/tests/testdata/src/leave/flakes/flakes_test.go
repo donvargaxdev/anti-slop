@@ -178,6 +178,16 @@ func waitForReadiness(ready func() bool, state fakeTest) {
 	}
 }
 
+func TestDistinctSubtestsWithStoredLoopBound(t *testing.T) {
+	for i, name := range []string{"a", "b", "c"} {
+		t.Run(name, func(t *testing.T) {})
+		last := i == 2
+		if last {
+			break
+		}
+	}
+}
+
 func noRetryFromStoredOrUnassignedResult(state struct{ err error }, outcomes map[int]error) {
 	err := check()
 	for err != nil {

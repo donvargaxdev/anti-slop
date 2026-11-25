@@ -615,6 +615,17 @@ func TestPollUntilSwitchDefault(t *testing.T) {
 	}
 }
 
+func TestPollUntilLaterSwitchCase(t *testing.T) {
+	start := Now()
+	for { // want "polling against the wall clock"
+		switch {
+		case Since(start) < Second:
+		case true:
+			t.Fatal("timeout")
+		}
+	}
+}
+
 func TestPollUntilSwitchFallthrough(t *testing.T) {
 	start := Now()
 	for { // want "polling against the wall clock"

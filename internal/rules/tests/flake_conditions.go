@@ -88,7 +88,7 @@ func (c flakeChecks) failureCondition(condition ast.Expr, failure bool, attempt 
 			return failure && (!c.retryHeader || attempt == nil || c.retryErrorOutcome(expr.Args[0]) != 0)
 		case testingMethod(c.info, expr, "Run"):
 			return !failure
-		case attempt != nil:
+		case attempt != nil || c.retry != nil:
 			if c.retryHeader {
 				// A callback or a method predicate may only be waiting for readiness.
 				fn := calledFunc(c.info, expr)
@@ -103,13 +103,12 @@ func (c flakeChecks) failureCondition(condition ast.Expr, failure bool, attempt 
 		if polarity == shortMode {
 			return false
 		}
-		if polarity != 0 && c.attemptResult(expr, attempt) {
+		if c.attemptResult(expr, attempt) {
 			if failure {
 				return polarity&failsWhenTrue != 0
 			}
 			return polarity&failsWhenFalse != 0
 		}
-		return !failure && attempt != nil && c.attemptResult(expr, attempt) && booleanResult(c.info, expr)
 	}
 	return false
 }

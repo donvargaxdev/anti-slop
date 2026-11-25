@@ -168,6 +168,17 @@ retry:
 	}
 }
 
+func retryHeaderReachedOnlyByContinue() {
+	err := check()
+	for attempt := 0; attempt < 3 && err != nil; attempt++ { // want "retrying a check or test body"
+		if attempt == 0 {
+			err = check()
+			continue
+		}
+		return
+	}
+}
+
 func TestRetryWithCopiedTupleResult(t *test.T) {
 	multiCheck := func() (int, error) { return 0, check() }
 	_, err := multiCheck()
@@ -280,6 +291,15 @@ func TestRetryStoredSubtest(t *test.T) {
 func TestRetryStoredFailure(t *test.T) {
 	for range 3 { // want "retrying a check or test body"
 		failed := !t.Run("body", body)
+		if !failed {
+			break
+		}
+	}
+}
+
+func retryStoredBooleanCheck() {
+	for range 3 { // want "retrying a check or test body"
+		failed := !probe()
 		if !failed {
 			break
 		}

@@ -510,6 +510,17 @@ func TestClockSampleAssignedOnOnlyIteration(t *testing.T) {
 	}
 }
 
+func TestSwitchExitBeforeClockCase(t *testing.T) {
+	start := time.Now()
+	for range 3 {
+		switch {
+		case testing.Short():
+			t.Skip("short mode")
+		case time.Since(start) < time.Second:
+		}
+	}
+}
+
 func TestClockSwitchWithLocalBreak(t *testing.T) {
 	start := time.Now()
 	for {
@@ -517,8 +528,6 @@ func TestClockSwitchWithLocalBreak(t *testing.T) {
 		case time.Since(start) > time.Second:
 			t.Log("slow")
 			break
-		case testing.Short():
-			return
 		}
 	}
 }
