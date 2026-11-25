@@ -1,6 +1,4 @@
-// Package port defines how the comments command asks for its findings: the
-// packages a pattern names are checked behind it, and what it can report or
-// fail with is declared here.
+// Package port defines the checker for commands that report findings in Go packages.
 package port
 
 import (
@@ -10,7 +8,7 @@ import (
 	"strings"
 )
 
-// Finding is one comment the rule refuses, at the place it starts. Line and
+// Finding is one diagnostic a rule reports, at the place it starts. Line and
 // Col count from 1.
 type Finding struct {
 	Path   string
@@ -35,7 +33,7 @@ type CheckFailure interface {
 }
 
 // Failed is returned when the packages a pattern names cannot be loaded: it
-// matches none, or a file of one does not parse.
+// matches none, or one of the packages contains invalid source.
 type Failed struct{ Reason string }
 
 func (*Failed) checkFailure()   {}
@@ -48,7 +46,7 @@ type Cancelled struct{}
 func (*Cancelled) checkFailure()   {}
 func (e *Cancelled) Error() string { return "cancelled check" }
 
-// Checker finds the comments no tool reads in the packages patterns name, as
+// Checker reports findings in the packages patterns name, as
 // go list reads patterns. Its findings are in order of path, line and column,
 // and none is given twice. ctx carries only the check's cancellation and
 // deadline, never a value.

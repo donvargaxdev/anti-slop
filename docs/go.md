@@ -43,13 +43,17 @@ The `comments` command is the second slice, `internal/slices/comments`, and runs
   library and the analysis framework and nothing of ours (`rule`, `rule-tests`). Its fixtures are
   `analysistest` packages under `testdata/src`, one that must be caught and one that must be left.
   The graph check lets only an adapter import a rule, and `cmd` assemble one.
-- `port` declares `Checker`, `Finding` and its sealed failures, `Failed` and `Cancelled`.
-  `port/porttest` holds the fake and `CheckerContract`, which the fake and the adapter both pass.
+- `internal/engine/checking/port` declares the shared `Checker`, `Finding` and the sealed failures
+  `Failed` and `Cancelled`. Its `porttest` holds the fake and the contract suite for the adapters.
 - `loader` is the adapter: it loads the patterns with go list through `go/packages` and runs the
   rule over each package's syntax, tests included, each finding once.
 - `command` is the command: `Patterns` is the checked argument (no empty or NUL pattern, none a flag
   or a loader query), `Run` prints each finding as `path:line:col: comments: <reason>` and exits 0,
   since the rule only reports, and `Classify` gives the failures their problems.
+
+The `tests` slice uses the same checker port. Its loader requests type information through
+`go/packages` to resolve standard-library calls, including renamed and dot imports. The
+`internal/rules/tests` analyzer limits findings to `_test.go` files.
 
 Around them:
 

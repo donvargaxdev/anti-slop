@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"github.com/donvargaxdev/anti-slop/internal/cli"
-	"github.com/donvargaxdev/anti-slop/internal/slices/comments/port"
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
 )
 
 // Classify is the comments slice's classifier: it maps the checker port's

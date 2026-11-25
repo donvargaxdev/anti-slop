@@ -3,7 +3,7 @@ Feature: Test smells
   anti-slop tests <pattern>... reports calls to time.Sleep, os.Setenv and os.Unsetenv
   in Go test files. Each finding occupies one line on stdout and the command exits 0.
 
-  @wip @ID-TESTS-01 @tests-rule @binary-only
+  @ID-TESTS-01 @tests-rule @binary-only
   Scenario: tests reports sleep and raw environment changes and exits 0
     Given the file "go.mod" holds:
       """
@@ -33,7 +33,7 @@ Feature: Test smells
     And its standard output lists "p_test.go:11:9: tests: avoid os.Unsetenv in tests"
     And its error output is empty
 
-  @wip @ID-TESTS-02 @tests-rule @binary-only
+  @ID-TESTS-02 @tests-rule @binary-only
   Scenario: tests leaves t.Setenv and calls in ordinary Go files
     Given the file "go.mod" holds:
       """
@@ -64,13 +64,13 @@ Feature: Test smells
     And its standard output is empty
     And its error output is empty
 
-  @wip @ID-TESTS-03 @tests-rule
+  @ID-TESTS-03 @tests-rule
   Scenario: tests rejects a pattern that go list would take for a flag
     When anti-slop runs with "tests -- -x"
     Then it exits with code 80
     And its error output says "-x"
 
-  @wip @ID-TESTS-04 @tests-rule @binary-only
+  @ID-TESTS-04 @tests-rule @binary-only
   Scenario: tests reports when packages cannot be loaded
     Given the file "go.mod" holds:
       """

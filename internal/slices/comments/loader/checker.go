@@ -13,8 +13,8 @@ import (
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/packages"
 
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
 	"github.com/donvargaxdev/anti-slop/internal/rules/comments"
-	"github.com/donvargaxdev/anti-slop/internal/slices/comments/port"
 )
 
 // Checker is the port's implementation over the go command. Dir is the folder
