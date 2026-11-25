@@ -369,3 +369,17 @@ func TestSnapshotBeforeLoop(t *testing.T) {
 		}
 	}
 }
+
+func TestReceiveAfterReturningBranch(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	if testing.Short() {
+		ch = ready
+	} else {
+		return
+	}
+	for range 3 {
+		<-ch
+	}
+}

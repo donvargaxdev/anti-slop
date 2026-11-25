@@ -324,3 +324,32 @@ func skipAfterSelect(t *test.T, gate <-chan bool) {
 		t.Skip("failed") // want "skipping after a failure"
 	}
 }
+
+func skipAfterOptionalLoops(t *test.T, count int) {
+	failed := t.Failed()
+	for range count {
+		failed = false
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+	for i := 0; i < count; i++ {
+		failed = false
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func retryUntilLabeledReturn() {
+	for range 3 { // want "retrying a check or test body"
+		if check() != nil {
+			continue
+		}
+		if test.Verbose() {
+			goto passed
+		}
+	passed:
+		return
+	}
+}

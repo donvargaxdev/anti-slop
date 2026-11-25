@@ -2,6 +2,7 @@ package tests
 
 import (
 	"go/ast"
+	"go/constant"
 	"go/types"
 	"strings"
 
@@ -98,6 +99,37 @@ func namedInPackage(fn *types.Func, path string, names []string) bool {
 
 func report(pass *analysis.Pass, node ast.Node, reason string) {
 	pass.Report(analysis.Diagnostic{Pos: node.Pos(), Category: "tests", Message: reason})
+}
+
+func forMaySkip(info *types.Info, cond ast.Expr) bool {
+	value := info.Types[cond].Value
+	return cond != nil && (value == nil || !constant.BoolVal(value))
+}
+
+func rangeMayBeEmpty(info *types.Info, expr ast.Expr) bool {
+	if value := info.Types[expr].Value; value != nil {
+		switch value.Kind() {
+		case constant.Int:
+			return constant.Sign(value) <= 0
+		case constant.String:
+			return constant.StringVal(value) == ""
+		}
+	}
+	underlying := info.TypeOf(expr).Underlying()
+	if pointer, ok := underlying.(*types.Pointer); ok {
+		underlying = pointer.Elem().Underlying()
+	}
+	if array, ok := underlying.(*types.Array); ok {
+		return array.Len() == 0
+	}
+	return true
+}
+
+func unlabel(stmt ast.Stmt) ast.Stmt {
+	for label, ok := stmt.(*ast.LabeledStmt); ok; label, ok = stmt.(*ast.LabeledStmt) {
+		stmt = label.Stmt
+	}
+	return stmt
 }
 
 // contains checks an expression or statement without entering another function body.

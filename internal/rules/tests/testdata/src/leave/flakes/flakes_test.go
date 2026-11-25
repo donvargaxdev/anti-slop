@@ -260,3 +260,38 @@ func skipInIndependentSelectClause(t *testing.T, gate <-chan struct{}) {
 	}
 	_ = failed
 }
+
+func TestSkipAfterGuaranteedLoops(t *testing.T) {
+	failed := t.Failed()
+	for range 1 {
+		failed = false
+	}
+	if failed {
+		t.Skip("optional test")
+	}
+	failed = t.Failed()
+	for {
+		failed = false
+		break
+	}
+	if failed {
+		t.Skip("optional test")
+	}
+}
+
+func TestContinueEvenOnSuccess(t *testing.T) {
+	for range 3 {
+		if testing.Verbose() {
+			t.Log("checking")
+		} else if check() != nil {
+			continue
+		}
+	}
+	for range 3 {
+		if check() != nil {
+			continue
+		}
+		t.Log("passed")
+		continue
+	}
+}

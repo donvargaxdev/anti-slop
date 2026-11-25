@@ -5,7 +5,6 @@ import (
 	"go/token"
 	"go/types"
 	"maps"
-	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -99,6 +98,15 @@ func (c flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.N
 			return false
 		}
 		switch stmt := node.(type) {
+		case *ast.ForStmt:
+			c.walk(stmt.Init, visit)
+			c.walk(stmt.Cond, visit)
+			c.walkLoop(stmt.Body, stmt.Post, forMaySkip(c.info, stmt.Cond), visit)
+			return false
+		case *ast.RangeStmt:
+			c.walk(stmt.X, visit)
+			c.walkLoop(stmt.Body, nil, rangeMayBeEmpty(c.info, stmt.X), visit)
+			return false
 		case *ast.SwitchStmt:
 			c.walk(stmt.Init, visit)
 			c.walk(stmt.Tag, visit)
@@ -132,6 +140,18 @@ func (c flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.N
 		}
 		return true
 	})
+}
+
+func (c flakeChecks) walkLoop(body *ast.BlockStmt, post ast.Stmt, maySkip bool, visit func(flakeChecks, ast.Node, ast.Node) bool) {
+	iteration := c
+	if maySkip {
+		iteration.outcomes = maps.Clone(c.outcomes)
+	}
+	iteration.walk(body, visit)
+	iteration.walk(post, visit)
+	if maySkip {
+		mergeOutcomes(c.outcomes, iteration.outcomes)
+	}
 }
 
 func (c flakeChecks) walkCommunications(body *ast.BlockStmt, visit func(flakeChecks, ast.Node, ast.Node) bool) {
@@ -382,8 +402,11 @@ func (c flakeChecks) continuesUntilSuccess(stmt *ast.IfStmt, body *ast.BlockStmt
 	if !ok {
 		return false
 	}
-	next := slices.Index(block.List, ast.Stmt(stmt)) + 1
-	for _, sibling := range block.List[next:] {
+	for _, sibling := range block.List {
+		if sibling.Pos() < stmt.End() {
+			continue
+		}
+		sibling = unlabel(sibling)
 		if exitsAttempt(sibling) {
 			return true
 		}

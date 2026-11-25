@@ -5,6 +5,21 @@ import (
 	. "time"
 )
 
+var packageDeadline = After(Second)
+
+func pollPackageDeadline() {
+	for range 3 { // want "polling against the wall clock"
+		<-packageDeadline
+	}
+}
+
+func receiveDeadlineWhenReturning() Time {
+	for range 1 { // want "polling against the wall clock"
+		return <-After(Second)
+	}
+	return Time{}
+}
+
 func TestPoll(t *testing.T) {
 	start := Now()
 	end := start.Add(Second)

@@ -2,7 +2,6 @@ package tests
 
 import (
 	"go/ast"
-	"go/constant"
 	"go/token"
 	"go/types"
 	"maps"
@@ -136,16 +135,19 @@ func (scan *pollingScan) visit(node ast.Node) bool {
 		scan.recordSelect(expr.Body, label)
 	case *ast.ForStmt:
 		scan.record(expr.Init)
-		condition := scan.info.Types[expr.Cond].Value
-		maySkip := expr.Cond != nil && (condition == nil || !constant.BoolVal(condition))
-		scan.recordLoop(label, maySkip, expr.Body, expr.Post, func(iteration *pollingScan) {
+		scan.recordLoop(label, forMaySkip(scan.info, expr.Cond), expr.Body, expr.Post, func(iteration *pollingScan) {
 			iteration.record(expr.Cond)
 		})
 	case *ast.RangeStmt:
 		scan.record(expr.X)
-		scan.recordLoop(label, scan.rangeMayBeEmpty(expr.X), expr.Body, nil, func(iteration *pollingScan) {
+		scan.recordLoop(label, rangeMayBeEmpty(scan.info, expr.X), expr.Body, nil, func(iteration *pollingScan) {
 			iteration.recordRangeAssignment(expr)
 		})
+	case *ast.ReturnStmt:
+		for _, result := range expr.Results {
+			scan.record(result)
+		}
+		scan.tracked = nil
 	case *ast.BranchStmt:
 		switch expr.Tok {
 		case token.BREAK, token.CONTINUE:
@@ -232,30 +234,8 @@ func (scan *pollingScan) recordSwitch(body *ast.BlockStmt, label types.Object) {
 }
 
 func isFallthrough(stmt ast.Stmt) bool {
-	for label, ok := stmt.(*ast.LabeledStmt); ok; label, ok = stmt.(*ast.LabeledStmt) {
-		stmt = label.Stmt
-	}
-	branch, ok := stmt.(*ast.BranchStmt)
+	branch, ok := unlabel(stmt).(*ast.BranchStmt)
 	return ok && branch.Tok == token.FALLTHROUGH
-}
-
-func (scan pollingScan) rangeMayBeEmpty(expr ast.Expr) bool {
-	if value := scan.info.Types[expr].Value; value != nil {
-		switch value.Kind() {
-		case constant.Int:
-			return constant.Sign(value) <= 0
-		case constant.String:
-			return constant.StringVal(value) == ""
-		}
-	}
-	underlying := scan.info.TypeOf(expr).Underlying()
-	if pointer, ok := underlying.(*types.Pointer); ok {
-		underlying = pointer.Elem().Underlying()
-	}
-	if array, ok := underlying.(*types.Array); ok {
-		return array.Len() == 0
-	}
-	return true
 }
 
 func (scan *pollingScan) recordLoop(label types.Object, maySkip bool, body *ast.BlockStmt, post ast.Stmt, beforeBody func(*pollingScan)) {
