@@ -325,7 +325,7 @@ func skipAfterSelect(t *test.T, gate <-chan bool) {
 	}
 }
 
-func skipAfterOptionalLoops(t *test.T, count int) {
+func skipAfterOptionalRange(t *test.T, count int) {
 	failed := t.Failed()
 	for range count {
 		failed = false
@@ -333,6 +333,10 @@ func skipAfterOptionalLoops(t *test.T, count int) {
 	if failed {
 		t.Skip("failed") // want "skipping after a failure"
 	}
+}
+
+func skipAfterOptionalFor(t *test.T, count int) {
+	failed := t.Failed()
 	for i := 0; i < count; i++ {
 		failed = false
 	}
@@ -486,6 +490,63 @@ func TestRetryUntilComparedSuccess(t *test.T) {
 func TestSkipOnStoredComparedFailure(t *test.T) {
 	const succeeded = true
 	failed := succeeded != t.Run("body", func(t *test.T) {})
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnSwitchFailure(t *test.T) {
+	switch {
+	case t.Failed():
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnBooleanSwitchFailure(t *test.T) {
+	switch ok := t.Run("body", func(t *test.T) {}); ok {
+	case false:
+		t.SkipNow() // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnDefaultFailure(t *test.T) {
+	switch {
+	default:
+		t.Skip("failed") // want "skipping after a failure"
+	case !t.Failed():
+		t.Log("passed")
+	}
+}
+
+func TestSkipOnFailureWithConstantSwitchTag(t *test.T) {
+	switch false {
+	case !t.Failed():
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnFailureWithFallthrough(t *test.T) {
+	switch {
+	case t.Failed() && test.Short():
+		fallthrough
+	case t.Failed():
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnFailureAfterLoggingError(t *test.T) {
+	failed := t.Failed()
+	if test.Short() {
+		t.Error("unsupported")
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnFailureAfterDeferredFatal(t *test.T) {
+	failed := t.Failed()
+	defer t.Fatal("unsupported")
 	if failed {
 		t.Skip("failed") // want "skipping after a failure"
 	}

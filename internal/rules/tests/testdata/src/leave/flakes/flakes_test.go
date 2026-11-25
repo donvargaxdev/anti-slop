@@ -449,3 +449,53 @@ func TestComparedSuccessLeavesNoFailedOutcome(t *testing.T) {
 		t.Skip("optional")
 	}
 }
+
+func TestFatalBranchDoesNotCarryFailure(t *testing.T) {
+	failed := t.Failed()
+	if testing.Short() {
+		failed = false
+	} else {
+		t.Fatal("unsupported")
+	}
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipBranchDoesNotCarryFailure(t *testing.T) {
+	failed := t.Failed()
+	switch {
+	case testing.Short():
+		t.SkipNow()
+	default:
+		failed = false
+	}
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipOnIndependentSwitchAlternative(t *testing.T) {
+	switch {
+	case t.Failed(), testing.Short():
+		t.Skip("optional")
+	}
+}
+
+func TestSkipOnIndependentFallthrough(t *testing.T) {
+	switch {
+	case testing.Short():
+		fallthrough
+	case t.Failed():
+		t.Skip("optional")
+	}
+}
+
+func TestSkipInNestedFunctionOfFailureCase(t *testing.T) {
+	switch {
+	case t.Failed():
+		t.Run("subtest", func(t *testing.T) {
+			t.Skip("optional")
+		})
+	}
+}

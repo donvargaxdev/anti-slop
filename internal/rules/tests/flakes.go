@@ -20,8 +20,9 @@ var Flakes = &analysis.Analyzer{
 type flakeChecks struct {
 	info *types.Info
 	// A nil map marks a path that jumped away.
-	outcomes map[types.Object]outcomePolarity
-	target   *branchTarget[outcomePolarity]
+	outcomes     map[types.Object]outcomePolarity
+	target       *branchTarget[outcomePolarity]
+	failureGuard bool
 }
 
 type outcomePolarity uint8
@@ -61,20 +62,10 @@ func (c flakeChecks) reportFinding(node ast.Node, reportOnce func(ast.Node, stri
 		if (maxIterations == unknownIterations || maxIterations > 1) && c.retriesLoop(stmt.Body) {
 			reportOnce(stmt, "retrying a check or test body")
 		}
-	case *ast.IfStmt:
-		for _, branch := range c.outcomeBranches(stmt, true, nil) {
-			if branch == nil {
-				continue
-			}
-			contains(branch, func(node ast.Node) bool {
-				if call, ok := node.(*ast.CallExpr); ok &&
-					testingMethod(c.info, call, "Skip", "Skipf", "SkipNow") {
-					reportOnce(call, "skipping after a failure")
-				}
-				return false
-			})
-		}
 	case *ast.CallExpr:
+		if c.failureGuard && testingMethod(c.info, stmt, "Skip", "Skipf", "SkipNow") {
+			reportOnce(stmt, "skipping after a failure")
+		}
 		if wrapsTestInRetry(c.info, stmt) {
 			reportOnce(stmt, "retrying a test body")
 		}
@@ -99,11 +90,14 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 			if visit(*c, stmt, parent) {
 				c.walk(stmt.Cond, visit)
 				then := c.fork()
+				then.failureGuard = c.failureGuard || c.failureCondition(stmt.Cond, true, nil)
 				then.constrainOutcome(stmt.Cond, failsWhenTrue)
 				then.walk(stmt.Body, visit)
-				c.constrainOutcome(stmt.Cond, failsWhenFalse)
-				c.walk(stmt.Else, visit)
-				c.outcomes = mergeOutcomes(c.outcomes, then.outcomes)
+				otherwise := c.fork()
+				otherwise.failureGuard = c.failureGuard || c.failureCondition(stmt.Cond, false, nil)
+				otherwise.constrainOutcome(stmt.Cond, failsWhenFalse)
+				otherwise.walk(stmt.Else, visit)
+				c.outcomes = mergeOutcomes(otherwise.outcomes, then.outcomes)
 			}
 			return false
 		}
@@ -135,12 +129,12 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 		case *ast.SwitchStmt:
 			c.walk(stmt.Init, visit)
 			c.walk(stmt.Tag, visit)
-			c.walkCases(stmt.Body, label, visit)
+			c.walkCases(stmt.Body, label, c.switchFailureGuards(stmt), visit)
 			return false
 		case *ast.TypeSwitchStmt:
 			c.walk(stmt.Init, visit)
 			c.walk(stmt.Assign, visit)
-			c.walkCases(stmt.Body, label, visit)
+			c.walkCases(stmt.Body, label, nil, visit)
 			return false
 		case *ast.SelectStmt:
 			c.walkCommunications(stmt.Body, label, visit)
@@ -151,6 +145,12 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 			}
 			c.outcomes = nil
 			return false
+		case *ast.ExprStmt:
+			if endsTest(c.info, stmt.X) {
+				c.walk(stmt.X, visit)
+				c.outcomes = nil
+				return false
+			}
 		case *ast.BranchStmt:
 			if stmt.Tok == token.BREAK || stmt.Tok == token.CONTINUE {
 				c.recordBranch(stmt)
@@ -161,7 +161,9 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 			}
 			return false
 		case *ast.FuncLit:
-			c.fork().walk(stmt.Body, visit)
+			body := c.fork()
+			body.failureGuard = false
+			body.walk(stmt.Body, visit)
 			return false
 		case *ast.AssignStmt:
 			outcomes := c.assignmentOutcomes(stmt.Rhs, len(stmt.Lhs))
@@ -241,10 +243,11 @@ func (c *flakeChecks) walkCommunications(body *ast.BlockStmt, label types.Object
 	c.outcomes = mergeOutcomes(c.outcomes, entry.target.breaks)
 }
 
-func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, visit func(flakeChecks, ast.Node, ast.Node) bool) {
+func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, failureGuards map[*ast.CaseClause]bool, visit func(flakeChecks, ast.Node, ast.Node) bool) {
 	entry := c.withTarget(label, false)
 	c.outcomes = nil
 	var fallingThrough map[types.Object]outcomePolarity
+	fallthroughGuard := false
 	hasDefault := false
 	for _, stmt := range body.List {
 		clause := stmt.(*ast.CaseClause)
@@ -254,12 +257,14 @@ func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, visit f
 			branch.walk(expr, visit)
 		}
 		// Fallthrough enters the next body without evaluating the case expressions.
+		branch.failureGuard = entry.failureGuard || failureGuards[clause] && (fallingThrough == nil || fallthroughGuard)
 		branch.outcomes = mergeOutcomes(branch.outcomes, fallingThrough)
 		for _, stmt := range clause.Body {
 			branch.walk(stmt, visit)
 		}
 		if len(clause.Body) > 0 && isFallthrough(clause.Body[len(clause.Body)-1]) {
 			fallingThrough = branch.outcomes
+			fallthroughGuard = branch.failureGuard
 		} else {
 			fallingThrough = nil
 			c.outcomes = mergeOutcomes(c.outcomes, branch.outcomes)
@@ -269,6 +274,43 @@ func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, visit f
 		c.outcomes = mergeOutcomes(c.outcomes, entry.outcomes)
 	}
 	c.outcomes = mergeOutcomes(c.outcomes, entry.target.breaks)
+}
+
+func (c flakeChecks) switchFailureGuards(stmt *ast.SwitchStmt) map[*ast.CaseClause]bool {
+	guards := make(map[*ast.CaseClause]bool)
+	var defaultClause *ast.CaseClause
+	noMatchRequiresFailure := false
+	for _, node := range stmt.Body.List {
+		clause := node.(*ast.CaseClause)
+		if clause.List == nil {
+			defaultClause = clause
+			continue
+		}
+		// Each expression can select this body. Later expressions are reached
+		// only after all earlier expressions in the switch have failed to match.
+		matchRequiresFailure := true
+		for _, expr := range clause.List {
+			matchRequiresFailure = matchRequiresFailure && (noMatchRequiresFailure || c.switchOutcome(stmt.Tag, expr, true))
+			noMatchRequiresFailure = noMatchRequiresFailure || c.switchOutcome(stmt.Tag, expr, false)
+		}
+		guards[clause] = matchRequiresFailure
+	}
+	if defaultClause != nil {
+		guards[defaultClause] = noMatchRequiresFailure
+	}
+	return guards
+}
+
+func (c flakeChecks) switchOutcome(tag, expr ast.Expr, matches bool) bool {
+	if tag == nil {
+		return c.failureCondition(expr, matches, nil)
+	}
+	if value := c.info.Types[tag].Value; value != nil && value.Kind() == constant.Bool {
+		return c.failureCondition(expr, matches == constant.BoolVal(value), nil)
+	}
+	value := c.info.Types[expr].Value
+	return value != nil && value.Kind() == constant.Bool &&
+		c.failureCondition(tag, matches == constant.BoolVal(value), nil)
 }
 
 func mergeOutcomes(dst, src map[types.Object]outcomePolarity) map[types.Object]outcomePolarity {
