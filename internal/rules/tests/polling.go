@@ -367,23 +367,21 @@ func (scan *pollingScan) recordClockGuard(expr ast.Expr) bool {
 
 func (scan *pollingScan) recordSwitch(body *ast.BlockStmt, label types.Object, tagReadsClock bool) {
 	entry := scan.withTarget(label, false)
+	matches, anyClockCase := entry.matchPollingCases(body)
 	scan.stopPath()
-	var defaultClause *ast.CaseClause
 	var fallingThrough pollingFlow
-	anyClockCase, clockFallthrough := false, false
-	guardedContinue, defaultContinues := false, false
+	clockFallthrough := false
+	guardedContinue, hasDefault := false, false
 	for _, stmt := range body.List {
 		clause := stmt.(*ast.CaseClause)
+		matched := matches[clause]
 		if clause.List == nil {
-			defaultClause = clause
+			hasDefault = true
+			matched = pollingCase{flow: entry.pollingFlow, readsClock: anyClockCase}
 		}
-		branch := entry.fork()
-		caseReadsClock := false
-		for _, expr := range clause.List {
-			caseReadsClock = branch.recordClockGuard(expr) || caseReadsClock
-		}
-		anyClockCase = anyClockCase || caseReadsClock
-		clockGuard := tagReadsClock || caseReadsClock || clockFallthrough
+		branch := *entry
+		branch.pollingFlow = matched.flow
+		clockGuard := tagReadsClock || matched.readsClock || clockFallthrough
 		if clockGuard {
 			scan.clockGuards[clause] = true
 		}
@@ -395,11 +393,7 @@ func (scan *pollingScan) recordSwitch(body *ast.BlockStmt, label types.Object, t
 			branch.record(stmt)
 			fallsThrough = fallsThrough || isFallthrough(stmt)
 		}
-		continues := scan.continueCount() != before
-		if clause == defaultClause {
-			defaultContinues = continues
-		}
-		guardedContinue = guardedContinue || clockGuard && continues
+		guardedContinue = guardedContinue || clockGuard && scan.continueCount() != before
 		if fallsThrough {
 			fallingThrough = branch.pollingFlow
 			clockFallthrough = clockGuard
@@ -409,14 +403,37 @@ func (scan *pollingScan) recordSwitch(body *ast.BlockStmt, label types.Object, t
 		clockFallthrough = false
 		scan.pollingFlow = mergePollingFlows(scan.pollingFlow, branch.pollingFlow)
 	}
-	if defaultClause == nil {
+	if !hasDefault {
 		scan.pollingFlow = mergePollingFlows(scan.pollingFlow, entry.pollingFlow)
-	} else if anyClockCase {
-		// Default runs only if none of the case expressions match.
-		scan.clockGuards[defaultClause] = true
 	}
 	scan.pollingFlow = mergePollingFlows(scan.pollingFlow, entry.target.breaks)
-	scan.markBypassed(guardedContinue || anyClockCase && defaultContinues)
+	scan.markBypassed(guardedContinue)
+}
+
+type pollingCase struct {
+	flow       pollingFlow
+	readsClock bool
+}
+
+func (scan *pollingScan) matchPollingCases(body *ast.BlockStmt) (map[*ast.CaseClause]pollingCase, bool) {
+	matches := make(map[*ast.CaseClause]pollingCase)
+	anyClockCase := false
+	for _, stmt := range body.List {
+		clause := stmt.(*ast.CaseClause)
+		if clause.List == nil {
+			continue
+		}
+		var matched pollingCase
+		// Later expressions run only when earlier ones miss. Default uses the
+		// state after all expressions miss, wherever its body appears.
+		for _, expr := range clause.List {
+			matched.readsClock = scan.recordClockGuard(expr) || matched.readsClock
+			matched.flow = mergePollingFlows(matched.flow, scan.pollingFlow)
+		}
+		matches[clause] = matched
+		anyClockCase = anyClockCase || matched.readsClock
+	}
+	return matches, anyClockCase
 }
 
 func isFallthrough(stmt ast.Stmt) bool {

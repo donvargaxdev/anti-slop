@@ -986,3 +986,17 @@ func TestSkipAfterLoopBreakLeavesFailure(t *test.T) {
 		t.Skip("failed") // want "skipping after a failure"
 	}
 }
+
+func TestSkipAfterLoopConditionRequiresFailure(t *test.T) {
+	for !t.Failed() {
+		return
+	}
+	t.Skip("failed") // want "skipping after a failure"
+}
+
+func TestSkipAfterLoopConditionWithBackEdge(t *test.T) {
+	for !t.Failed() {
+		t.Error("failed")
+	}
+	t.Skip("failed") // want "skipping after a failure"
+}

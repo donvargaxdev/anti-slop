@@ -316,9 +316,13 @@ func (c *flakeChecks) walkLoop(label types.Object, body *ast.BlockStmt, conditio
 		return
 	}
 	entry := c.withTarget(label, true)
+	var skipped flakeFlow
 	for count := int64(1); ; count++ {
 		iteration := entry.fork()
 		iteration.walk(condition, visit)
+		if count == 1 && bounds.maySkip {
+			skipped = iteration.fork().exitOnFalse(condition)
+		}
 		iteration.failureGuard = iteration.failureGuard || iteration.failureCondition(condition, true, nil)
 		iteration.constrainOutcome(condition, failsWhenTrue)
 		if beforeBody != nil {
@@ -331,18 +335,20 @@ func (c *flakeChecks) walkLoop(label types.Object, body *ast.BlockStmt, conditio
 		// The next iteration can also start with values from the first entry.
 		next := mergeFlakeFlows(entry.fork().flakeFlow, iteration.flakeFlow)
 		if count == bounds.maxIterations || maps.Equal(entry.outcomes, next.outcomes) {
-			// Both normal exits require a false condition. Break bypasses it.
-			iteration.constrainOutcome(condition, failsWhenFalse)
-			exits := iteration.flakeFlow
-			if bounds.maySkip {
-				c.constrainOutcome(condition, failsWhenFalse)
-				exits = mergeFlakeFlows(exits, c.flakeFlow)
-			}
+			// A normal exit tests the condition again after the post statement.
+			iteration.walk(condition, visit)
+			exits := mergeFlakeFlows(iteration.exitOnFalse(condition), skipped)
 			c.flakeFlow = mergeFlakeFlows(exits, entry.target.breaks)
 			return
 		}
 		entry.flakeFlow = next
 	}
+}
+
+func (c *flakeChecks) exitOnFalse(condition ast.Expr) flakeFlow {
+	c.failureGuard = c.failureGuard || c.failureCondition(condition, false, nil)
+	c.constrainOutcome(condition, failsWhenFalse)
+	return c.flakeFlow
 }
 
 func (c *flakeChecks) walkCommunications(body *ast.BlockStmt, label types.Object, visit func(flakeChecks, ast.Node, ast.Node) bool) {

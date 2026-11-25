@@ -1027,3 +1027,26 @@ func TestSkipOnUnrelatedOutcomeReturnedByImmediateCall(t *testing.T) {
 		t.Skip("passed")
 	}
 }
+
+func TestSkipAfterLoopCanBreakOnSuccess(t *testing.T) {
+	for !t.Failed() {
+		break
+	}
+	t.Skip("optional")
+}
+
+func TestSkipAfterLoopConditionCanBecomeIndependent(t *testing.T) {
+	passed := !t.Failed()
+	for passed {
+		passed = testing.Short()
+	}
+	t.Skip("optional")
+}
+
+func TestSkipAfterLoopConditionCallUsesUpdatedOutcome(t *testing.T) {
+	passed := !t.Failed()
+	for func() bool { return passed }() {
+		passed = testing.Short()
+	}
+	t.Skip("optional")
+}

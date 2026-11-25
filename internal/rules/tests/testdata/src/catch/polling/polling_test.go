@@ -791,3 +791,18 @@ func TestShortCircuitedCallDoesNotReplaceDeadline(t *testing.T) {
 		<-ch
 	}
 }
+
+func TestEarlierSwitchAlternativeMatchesBeforeDeadlineIsReplaced(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	ch := After(Second)
+	switch {
+	case testing.Short(), func() bool {
+		ch = ready
+		return testing.Verbose()
+	}():
+		for range 3 { // want "polling against the wall clock"
+			<-ch
+		}
+	}
+}

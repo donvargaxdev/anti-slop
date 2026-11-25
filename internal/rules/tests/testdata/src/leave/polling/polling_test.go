@@ -711,3 +711,41 @@ func TestClockGuardOnlyReturnsFromImmediateCall(t *testing.T) {
 		}()
 	}
 }
+
+func TestSwitchExpressionReplacesDeadlineBeforeLaterCasesAndDefault(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	switch {
+	default:
+		for range 3 {
+			<-ch
+		}
+	case func() bool {
+		ch = ready
+		return testing.Short()
+	}():
+	case testing.Verbose():
+		for range 3 {
+			<-ch
+		}
+	}
+	for range 3 {
+		<-ch
+	}
+}
+
+func TestSwitchExpressionReplacesDeadlineWithoutDefault(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	switch {
+	case func() bool {
+		ch = ready
+		return testing.Short()
+	}():
+	}
+	for range 3 {
+		<-ch
+	}
+}
