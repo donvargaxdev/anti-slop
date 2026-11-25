@@ -919,3 +919,67 @@ func TestImmediateCallBindsLaterArgumentAfterSideEffects(t *testing.T) {
 		return true
 	}(), failed && true)
 }
+
+func TestSkipInSuccessShortCircuit(t *testing.T) {
+	_ = !t.Failed() && func() bool {
+		t.Skip("optional")
+		return true
+	}()
+	_ = t.Failed() || func() bool {
+		t.SkipNow()
+		return false
+	}()
+}
+
+func TestFailFastLoop(t *testing.T) {
+	for range 3 {
+		if err := check(); err == nil {
+			break
+		}
+		t.Fatal("failed")
+	}
+}
+
+func TestFailFastSwitch(t *testing.T) {
+attempts:
+	for range 3 {
+		switch err := check(); err {
+		case nil:
+			break attempts
+		default:
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestFailFastCheckCanBeBypassed(t *testing.T) {
+	for range 3 {
+		if testing.Short() {
+			continue
+		}
+		if err := check(); err == nil {
+			break
+		}
+		t.Fatal("failed")
+	}
+}
+
+func TestFailureContinuesAnOuterLoop(t *testing.T) {
+outer:
+	for range 3 {
+		for range 3 {
+			if err := check(); err == nil {
+				break
+			}
+			continue outer
+		}
+	}
+}
+
+func TestFailFastInPost(t *testing.T) {
+	for ; testing.Verbose(); t.FailNow() {
+		if err := check(); err == nil {
+			break
+		}
+	}
+}

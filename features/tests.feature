@@ -123,6 +123,17 @@ Feature: Test reliability
               }()
           }
       }
+
+      func TestSkipInShortCircuit(t *testing.T) {
+          _ = t.Failed() && func() bool {
+              t.Skip("failed")
+              return true
+          }()
+          _ = !t.Failed() || func() bool {
+              t.SkipNow()
+              return false
+          }()
+      }
       """
     When anti-slop runs with "tests ./..."
     Then it exits with code 0
@@ -142,6 +153,8 @@ Feature: Test reliability
       p_test.go:84:5: tests: retrying a check or test body
       p_test.go:92:5: tests: retrying a check or test body
       p_test.go:99:13: tests: skipping after a failure
+      p_test.go:106:9: tests: skipping after a failure
+      p_test.go:110:9: tests: skipping after a failure
       """
     And its error output is empty
 
@@ -189,6 +202,17 @@ Feature: Test reliability
               t.Skip("optional")
           }
       }
+
+      func TestFailFast(t *testing.T) {
+          for range 3 {
+              if err := check(); err == nil {
+                  break
+              }
+              t.Fatal("failed")
+          }
+      }
+
+      func check() error { return nil }
       """
     When anti-slop runs with "tests ./..."
     Then it exits with code 0

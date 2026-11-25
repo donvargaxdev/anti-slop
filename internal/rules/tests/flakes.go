@@ -21,7 +21,7 @@ type flakeChecks struct {
 	flakeFlow
 	target      *branchTarget[flakeFlow]
 	returns     *flakeFlow
-	retryBody   *ast.BlockStmt
+	retry       *retryScan
 	successCase bool
 	retryHeader bool
 }
@@ -30,6 +30,14 @@ type flakeFlow struct {
 	// A nil map marks a path that jumped away.
 	outcomes     map[types.Object]outcomePolarity
 	failureGuard bool
+	// A failed check can reach this point during the retry scan.
+	retryFailure bool
+}
+
+type retryScan struct {
+	body        *ast.BlockStmt
+	target      *branchTarget[flakeFlow]
+	successExit bool
 }
 
 type outcomePolarity uint8
@@ -63,12 +71,12 @@ func runFlakes(pass *analysis.Pass) (any, error) {
 func (c flakeChecks) reportFinding(node, parent ast.Node, reportOnce func(ast.Node, string)) {
 	switch stmt := node.(type) {
 	case *ast.ForStmt:
-		if forBounds(c.info, stmt.Cond).maxIterations != 0 && (c.retriesInHeader(stmt, parent) || c.retriesLoop(stmt.Body)) {
+		if forBounds(c.info, stmt.Cond).maxIterations != 0 && (c.retriesInHeader(stmt, parent) || c.retriesLoop(stmt.Body, stmt.Post, parent)) {
 			reportOnce(stmt, "retrying a check or test body")
 		}
 	case *ast.RangeStmt:
 		maxIterations := rangeBounds(c.info, stmt.X).maxIterations
-		if (maxIterations == unknownIterations || maxIterations > 1) && c.retriesLoop(stmt.Body) {
+		if (maxIterations == unknownIterations || maxIterations > 1) && c.retriesLoop(stmt.Body, nil, parent) {
 			reportOnce(stmt, "retrying a check or test body")
 		}
 	case *ast.CallExpr:
@@ -99,10 +107,13 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 			if visit(*c, stmt, parent) {
 				c.walk(stmt.Cond, visit)
 				then := c.fork()
+				otherwise := c.fork()
+				if c.retry != nil {
+					c.trackRetryBranches(stmt, parent, then, otherwise)
+				}
 				then.failureGuard = c.failureGuard || c.failureCondition(stmt.Cond, true, nil)
 				then.constrainOutcome(stmt.Cond, failsWhenTrue)
 				then.walk(stmt.Body, visit)
-				otherwise := c.fork()
 				otherwise.failureGuard = c.failureGuard || c.failureCondition(stmt.Cond, false, nil)
 				otherwise.constrainOutcome(stmt.Cond, failsWhenFalse)
 				otherwise.walk(stmt.Else, visit)
@@ -256,6 +267,7 @@ func (c *flakeChecks) walkShortCircuit(expr *ast.BinaryExpr, visit func(flakeChe
 	if expr.Op == token.LOR {
 		evaluate, skip = skip, evaluate
 	}
+	right.failureGuard = c.failureGuard || c.failureCondition(expr.X, evaluate == failsWhenTrue, nil)
 	right.constrainOutcome(expr.X, evaluate)
 	c.constrainOutcome(expr.X, skip)
 	right.walk(expr.Y, visit)
@@ -276,6 +288,9 @@ func (c flakeChecks) withTarget(label types.Object, isLoop bool) *flakeChecks {
 func (c *flakeChecks) recordBranch(stmt *ast.BranchStmt) {
 	target := c.target.destination(c.info, stmt)
 	if target == nil {
+		if c.retry != nil {
+			c.outcomes = nil
+		}
 		return
 	}
 	if stmt.Tok == token.CONTINUE {
@@ -324,8 +339,8 @@ func (c *flakeChecks) walkCommunications(body *ast.BlockStmt, label types.Object
 }
 
 type switchPath struct {
-	outcomes map[types.Object]outcomePolarity
-	guarded  bool
+	flow    flakeFlow
+	guarded bool
 }
 
 func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, tag ast.Expr, visit func(flakeChecks, ast.Node, ast.Node) bool) {
@@ -343,9 +358,9 @@ func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, tag ast
 			path = unmatched
 		}
 		branch := *entry
-		branch.outcomes = path.outcomes
+		branch.flakeFlow = path.flow
 		guardedOnSuccess := path.guarded && (fallingThrough.outcomes == nil || fallthroughGuard)
-		if c.retryBody == nil {
+		if c.retry == nil {
 			branch.failureGuard = entry.failureGuard || path.guarded
 		} else {
 			branch.successCase = entry.successCase || guardedOnSuccess
@@ -364,10 +379,8 @@ func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, tag ast
 		}
 	}
 	if !hasDefault {
-		exits = mergeFlakeFlows(exits, flakeFlow{
-			outcomes:     unmatched.outcomes,
-			failureGuard: entry.failureGuard || (c.retryBody == nil && unmatched.guarded),
-		})
+		unmatched.flow.failureGuard = entry.failureGuard || (c.retry == nil && unmatched.guarded)
+		exits = mergeFlakeFlows(exits, unmatched.flow)
 	}
 	c.flakeFlow = mergeFlakeFlows(exits, entry.target.breaks)
 }
@@ -375,8 +388,8 @@ func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, tag ast
 func (c *flakeChecks) matchSwitchCases(body *ast.BlockStmt, tag ast.Expr, visit func(flakeChecks, ast.Node, ast.Node) bool) (map[*ast.CaseClause]switchPath, switchPath) {
 	matches := make(map[*ast.CaseClause]switchPath)
 	var attempt ast.Node
-	if c.retryBody != nil {
-		attempt = c.retryBody
+	if c.retry != nil {
+		attempt = c.retry.body
 	}
 	unmatchedGuard := false
 	for _, node := range body.List {
@@ -390,15 +403,19 @@ func (c *flakeChecks) matchSwitchCases(body *ast.BlockStmt, tag ast.Expr, visit 
 			c.walk(expr, visit)
 			branch := c.fork()
 			matchGuard := branch.constrainSwitchCase(tag, expr, true, attempt)
-			matched.guarded = matched.guarded && (unmatchedGuard || matchGuard)
-			matched.outcomes = mergeOutcomes(matched.outcomes, branch.outcomes)
-
 			missGuard := c.constrainSwitchCase(tag, expr, false, attempt)
+			if c.retry != nil {
+				// If one side proves success, the other can carry a failed attempt.
+				branch.retryFailure = branch.retryFailure || missGuard
+				c.retryFailure = c.retryFailure || matchGuard
+			}
+			matched.guarded = matched.guarded && (unmatchedGuard || matchGuard)
+			matched.flow = mergeFlakeFlows(matched.flow, branch.flakeFlow)
 			unmatchedGuard = unmatchedGuard || missGuard
 		}
 		matches[clause] = matched
 	}
-	return matches, switchPath{outcomes: c.outcomes, guarded: unmatchedGuard}
+	return matches, switchPath{flow: c.flakeFlow, guarded: unmatchedGuard}
 }
 
 func (c *flakeChecks) constrainSwitchCase(tag, expr ast.Expr, matches bool, attempt ast.Node) bool {
@@ -435,7 +452,8 @@ func (c flakeChecks) switchCondition(tag, expr ast.Expr) (ast.Expr, bool) {
 func mergeFlakeFlows(dst, src flakeFlow) flakeFlow {
 	// Every path that reaches the join must require failure.
 	guarded := (dst.outcomes == nil || dst.failureGuard) && (src.outcomes == nil || src.failureGuard)
-	return flakeFlow{outcomes: mergeOutcomes(dst.outcomes, src.outcomes), failureGuard: guarded}
+	retryFailure := (dst.outcomes != nil && dst.retryFailure) || (src.outcomes != nil && src.retryFailure)
+	return flakeFlow{outcomes: mergeOutcomes(dst.outcomes, src.outcomes), failureGuard: guarded, retryFailure: retryFailure}
 }
 
 func mergeOutcomes(dst, src map[types.Object]outcomePolarity) map[types.Object]outcomePolarity {
@@ -545,45 +563,47 @@ func (c flakeChecks) storeOutcome(name *ast.Ident, polarity outcomePolarity) {
 	}
 }
 
-func (c flakeChecks) retriesLoop(body *ast.BlockStmt) bool {
-	// The main traversal still needs the state from before entering the loop.
-	c.outcomes = maps.Clone(c.outcomes)
-	// Only targets inside the attempt are tracked during this walk.
+func (c flakeChecks) retriesLoop(body *ast.BlockStmt, post ast.Stmt, parent ast.Node) bool {
+	var label types.Object
+	if labeled, ok := parent.(*ast.LabeledStmt); ok {
+		label = c.info.Defs[labeled.Label]
+	}
+	// Only the attempt's loop and targets inside it are relevant to the back edge.
 	c.target = nil
-	c.retryBody = body
-	found := false
-	c.walk(body, func(c flakeChecks, node, parent ast.Node) bool {
-		if found {
-			return false
-		}
-		switch stmt := node.(type) {
-		case *ast.FuncLit, *ast.ForStmt, *ast.RangeStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+	attempt := c.withTarget(label, true)
+	attempt.retry = &retryScan{body: body, target: attempt.target}
+	visit := func(c flakeChecks, node, _ ast.Node) bool {
+		switch node.(type) {
+		case *ast.FuncLit, *ast.ForStmt, *ast.RangeStmt:
 			return false
 		case *ast.ReturnStmt, *ast.BranchStmt:
-			found = c.successCase && c.exitsAttempt(stmt)
-		case *ast.IfStmt:
-			for _, branch := range c.outcomeBranches(stmt, false, body) {
-				if c.exitsAttempt(lastStatement(branch)) {
-					found = true
-					return false
-				}
+			if c.successCase && c.exitsAttempt(node) {
+				c.retry.successExit = true
 			}
-			found = c.continuesUntilSuccess(stmt, body, parent)
 		}
-		return !found
-	})
-	return found
+		return true
+	}
+	attempt.walk(body, visit)
+	attempt.flakeFlow = mergeFlakeFlows(attempt.flakeFlow, attempt.target.continues)
+	attempt.walk(post, visit)
+	return attempt.retry.successExit && attempt.outcomes != nil && attempt.retryFailure
 }
 
-func (c flakeChecks) outcomeBranches(stmt *ast.IfStmt, failure bool, attempt ast.Node) [2]ast.Stmt {
-	var branches [2]ast.Stmt
-	if c.failureCondition(stmt.Cond, failure, attempt) {
-		branches[0] = stmt.Body
+func (c flakeChecks) trackRetryBranches(stmt *ast.IfStmt, parent ast.Node, then, otherwise *flakeChecks) {
+	if c.failureCondition(stmt.Cond, false, c.retry.body) && c.exitsAttempt(lastStatement(stmt.Body)) {
+		then.successCase = true
+		otherwise.retryFailure = true
 	}
-	if stmt.Else != nil && c.failureCondition(stmt.Cond, !failure, attempt) {
-		branches[1] = stmt.Else
+	if c.failureCondition(stmt.Cond, true, c.retry.body) {
+		if c.exitsAttempt(lastStatement(stmt.Else)) {
+			otherwise.successCase = true
+			then.retryFailure = true
+		}
+		if c.continuesUntilSuccess(stmt, parent) {
+			c.retry.successExit = true
+			then.retryFailure = true
+		}
 	}
-	return branches
 }
 
 func lastStatement(branch ast.Stmt) ast.Stmt {
@@ -599,17 +619,20 @@ func (c flakeChecks) exitsAttempt(stmt ast.Node) bool {
 	case *ast.ReturnStmt:
 		return true
 	case *ast.BranchStmt:
-		return stmt.Tok == token.BREAK && c.target.destination(c.info, stmt) == nil
+		if stmt.Tok == token.BREAK {
+			target := c.target.destination(c.info, stmt)
+			return target == nil || target == c.retry.target
+		}
 	}
 	return false
 }
 
-func (c flakeChecks) continuesUntilSuccess(stmt *ast.IfStmt, body *ast.BlockStmt, parent ast.Node) bool {
-	if stmt.Else != nil || !c.failureCondition(stmt.Cond, true, body) {
+func (c flakeChecks) continuesUntilSuccess(stmt *ast.IfStmt, parent ast.Node) bool {
+	if stmt.Else != nil {
 		return false
 	}
 	branch, ok := lastStatement(stmt.Body).(*ast.BranchStmt)
-	if !ok || branch.Tok != token.CONTINUE {
+	if !ok || branch.Tok != token.CONTINUE || c.target.destination(c.info, branch) != c.retry.target {
 		return false
 	}
 	// A continue on failure is retry evidence only if success leaves the loop.

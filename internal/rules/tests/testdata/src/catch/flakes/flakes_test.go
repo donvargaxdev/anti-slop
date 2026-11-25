@@ -946,3 +946,14 @@ func TestImmediateParameterAssignmentLeavesCallerFailure(t *test.T) {
 		t.Skip("failed") // want "skipping after a failure"
 	}
 }
+
+func TestSkipInFailureShortCircuit(t *test.T) {
+	_ = t.Failed() && func() bool {
+		t.Skip("failed") // want "skipping after a failure"
+		return true
+	}()
+	_ = !t.Failed() || func() bool {
+		t.SkipNow() // want "skipping after a failure"
+		return false
+	}()
+}
