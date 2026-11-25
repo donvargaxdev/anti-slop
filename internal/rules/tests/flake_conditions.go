@@ -7,6 +7,39 @@ import (
 	"go/types"
 )
 
+func (c flakeChecks) recordBooleanReturn(stmt *ast.ReturnStmt) {
+	returns := c.returns
+	possible := failsWhenTrue | failsWhenFalse
+	polarity := c.outcomes[returns.result]
+	if len(stmt.Results) == 1 {
+		expr := stmt.Results[0]
+		polarity = c.booleanOutcome(expr)
+		if value := c.info.Types[expr].Value; value != nil {
+			possible = failsWhenFalse
+			if constant.BoolVal(value) {
+				possible = failsWhenTrue
+			}
+		}
+	}
+	returns.onlyShort = polarity == shortMode && (returns.flow.outcomes == nil || returns.onlyShort)
+	if c.failureGuard {
+		polarity = possible
+	}
+	returns.guarded |= possible & polarity
+	returns.unguarded |= possible &^ polarity
+}
+
+func (r flakeReturns) booleanOutcome() outcomePolarity {
+	// A return value implies failure only if every path producing it requires failure.
+	if polarity := r.guarded &^ r.unguarded; polarity != 0 {
+		return polarity
+	}
+	if r.onlyShort {
+		return shortMode
+	}
+	return 0
+}
+
 func (c flakeChecks) retriesInHeader(loop *ast.ForStmt, parent ast.Node) bool {
 	if loop.Cond == nil {
 		return false

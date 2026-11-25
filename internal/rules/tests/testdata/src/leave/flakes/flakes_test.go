@@ -1102,6 +1102,28 @@ func TestSkipOnUnrelatedOutcomeReturnedByImmediateCall(t *testing.T) {
 	}
 }
 
+func TestImmediateCallCanReturnTrueWithoutFailure(t *testing.T) {
+	if func() bool {
+		if t.Failed() {
+			return true
+		}
+		return testing.Short()
+	}() {
+		t.Skip("optional")
+	}
+}
+
+func TestImmediateCallCanReturnFailedCheckOrUnrelatedOutcome(t *testing.T) {
+	if func() bool {
+		if testing.Verbose() {
+			return t.Failed()
+		}
+		return true
+	}() {
+		t.Skip("optional")
+	}
+}
+
 func TestSkipAfterLoopCanBreakOnSuccess(t *testing.T) {
 	for !t.Failed() {
 		break

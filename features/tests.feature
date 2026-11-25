@@ -134,6 +134,17 @@ Feature: Test reliability
               return false
           }()
       }
+
+      func TestSkipOnConditionalReturn(t *testing.T) {
+          if func() bool {
+              if t.Failed() {
+                  return true
+              }
+              return false
+          }() {
+              t.Skip("failed")
+          }
+      }
       """
     When anti-slop runs with "tests ./..."
     Then it exits with code 0
@@ -155,6 +166,7 @@ Feature: Test reliability
       p_test.go:99:13: tests: skipping after a failure
       p_test.go:106:9: tests: skipping after a failure
       p_test.go:110:9: tests: skipping after a failure
+      p_test.go:122:9: tests: skipping after a failure
       """
     And its error output is empty
 

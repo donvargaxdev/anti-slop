@@ -37,8 +37,11 @@ type flakeFlow struct {
 }
 
 type flakeReturns struct {
-	flow   flakeFlow
-	result *types.Var
+	flow      flakeFlow
+	result    *types.Var
+	guarded   outcomePolarity
+	unguarded outcomePolarity
+	onlyShort bool
 }
 
 type outcomePolarity uint8
@@ -169,8 +172,8 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 				c.walk(result, visit)
 			}
 			if c.returns != nil {
-				if c.returns.result != nil && len(stmt.Results) == 1 && c.outcomes != nil {
-					c.storeObjectOutcome(c.returns.result, c.booleanOutcome(stmt.Results[0]))
+				if c.returns.result != nil && c.outcomes != nil {
+					c.recordBooleanReturn(stmt)
 				}
 				c.returns.flow = mergeFlakeFlows(c.returns.flow, c.flakeFlow)
 			}
@@ -257,7 +260,7 @@ func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit
 	}
 	body.walk(literal.Body, visit)
 	if returns.result != nil {
-		c.callOutcomes[call] = returns.flow.outcomes[returns.result]
+		c.callOutcomes[call] = returns.booleanOutcome()
 		delete(returns.flow.outcomes, returns.result)
 	}
 	// Explicit returns and fallthrough both resume the caller. A testing

@@ -1038,6 +1038,29 @@ func TestSkipOnFailureReturnedByImmediateCall(t *test.T) {
 	}
 }
 
+func TestSkipOnConditionalReturnFromImmediateCall(t *test.T) {
+	if func() bool {
+		if t.Failed() {
+			return true
+		}
+		return false
+	}() {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnConditionalFalseFromImmediateCall(t *test.T) {
+	passed := func() bool {
+		if !t.Failed() {
+			return true
+		}
+		return test.Short()
+	}()
+	if !passed {
+		t.SkipNow() // want "skipping after a failure"
+	}
+}
+
 func TestSkipOnStoredOutcomeReturnedByImmediateCall(t *test.T) {
 	passed := func() (ok bool) {
 		if test.Short() {
