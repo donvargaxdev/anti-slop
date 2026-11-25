@@ -204,6 +204,52 @@ func pollAfterOptionalRange(n int, ready <-chan Time) {
 	}
 }
 
+func pollAfterEarlyRangeBreak(ready <-chan Time) {
+	ch := After(Millisecond)
+	for range 1 {
+		if testing.Short() {
+			break
+		}
+		ch = ready
+	}
+	for { // want "polling against the wall clock"
+		select {
+		case <-ch:
+			return
+		default:
+		}
+	}
+}
+
+func pollAfterLabeledBreak(ready <-chan Time) {
+	ch := After(Millisecond)
+loop:
+	for range 1 {
+		select {
+		default:
+			for range 1 {
+				if testing.Short() {
+					break loop
+				}
+			}
+		}
+		ch = ready
+	}
+	for range 1 { // want "polling against the wall clock"
+		<-ch
+	}
+}
+
+func pollAfterBreakBeforePost(ready <-chan Time) {
+	ch := After(Millisecond)
+	for ; true; ch = ready {
+		break
+	}
+	for range 1 { // want "polling against the wall clock"
+		<-ch
+	}
+}
+
 func pollAfterOptionalFor(run bool, ready <-chan Time) {
 	ch := After(Millisecond)
 	for run {

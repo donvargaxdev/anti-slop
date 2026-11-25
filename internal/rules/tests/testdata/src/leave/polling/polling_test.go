@@ -146,6 +146,37 @@ func receiveAfterRequiredRange(ready <-chan time.Time) {
 	}
 }
 
+func receiveAfterNestedBreaks(ready <-chan time.Time) {
+	ch := time.After(time.Millisecond)
+	for range 1 {
+		switch {
+		case testing.Short():
+			break
+		}
+		select {
+		default:
+			break
+		}
+		for range 1 {
+			break
+		}
+		ch = ready
+	}
+	for range 1 {
+		<-ch
+	}
+}
+
+func receiveAfterBreakBeforePost(ready <-chan time.Time) {
+	ch := ready
+	for ; true; ch = time.After(time.Millisecond) {
+		break
+	}
+	for range 1 {
+		<-ch
+	}
+}
+
 func TestDeadlineReassignedOnBothBranches(t *testing.T) {
 	ready := make(chan time.Time)
 	other := make(chan time.Time)

@@ -40,9 +40,17 @@ func runPolling(pass *analysis.Pass) (any, error) {
 }
 
 type deadlineScan struct {
-	info     *types.Info
+	info *types.Info
+	// A nil channel map marks a path that has already taken a break.
 	channels map[types.Object]bool
 	receives map[*ast.UnaryExpr]bool
+	breaks   *breakTarget
+}
+
+type breakTarget struct {
+	label    types.Object
+	channels map[types.Object]bool
+	parent   *breakTarget
 }
 
 func deadlineReceives(pass *analysis.Pass) map[*ast.UnaryExpr]bool {
@@ -68,47 +76,75 @@ func deadlineReceives(pass *analysis.Pass) map[*ast.UnaryExpr]bool {
 	return scan.receives
 }
 
-func (scan deadlineScan) fork() deadlineScan {
+func (scan deadlineScan) fork() *deadlineScan {
 	scan.channels = maps.Clone(scan.channels)
-	return scan
+	return &scan
 }
 
-func (scan deadlineScan) record(root ast.Node) {
+func (scan deadlineScan) breakable(label types.Object) *deadlineScan {
+	branch := scan.fork()
+	branch.breaks = &breakTarget{label: label, parent: scan.breaks}
+	return branch
+}
+
+func mergeDeadlines(dst, src map[types.Object]bool) map[types.Object]bool {
+	if dst == nil {
+		return maps.Clone(src)
+	}
+	maps.Copy(dst, src)
+	return dst
+}
+
+func (scan *deadlineScan) record(root ast.Node) {
 	if root == nil {
 		return
 	}
 	ast.Inspect(root, scan.visit)
 }
 
-func (scan deadlineScan) visit(node ast.Node) bool {
+func (scan *deadlineScan) visit(node ast.Node) bool {
+	if scan.channels == nil {
+		return false
+	}
+	var label types.Object
+	if labeled, ok := node.(*ast.LabeledStmt); ok {
+		label = scan.info.Defs[labeled.Label]
+		node = labeled.Stmt
+	}
 	switch expr := node.(type) {
 	case *ast.FuncLit:
-		scan.fork().record(expr.Body)
+		body := scan.fork()
+		body.breaks = nil
+		body.record(expr.Body)
 	case *ast.IfStmt:
 		scan.record(expr.Init)
 		scan.record(expr.Cond)
 		other := scan.fork()
 		scan.record(expr.Body)
 		other.record(expr.Else)
-		maps.Copy(scan.channels, other.channels)
+		scan.channels = mergeDeadlines(scan.channels, other.channels)
 	case *ast.SwitchStmt:
 		scan.record(expr.Init)
 		scan.record(expr.Tag)
-		scan.recordSwitch(expr.Body)
+		scan.recordSwitch(expr.Body, label)
 	case *ast.TypeSwitchStmt:
 		scan.record(expr.Init)
 		scan.record(expr.Assign)
-		scan.recordSwitch(expr.Body)
+		scan.recordSwitch(expr.Body, label)
 	case *ast.SelectStmt:
-		scan.recordSelect(expr.Body)
+		scan.recordSelect(expr.Body, label)
 	case *ast.ForStmt:
 		scan.record(expr.Init)
 		condition := scan.info.Types[expr.Cond].Value
 		maySkip := expr.Cond != nil && (condition == nil || !constant.BoolVal(condition))
-		scan.recordLoop(maySkip, expr.Cond, expr.Body, expr.Post)
+		scan.recordLoop(label, maySkip, expr.Cond, expr.Body, expr.Post)
 	case *ast.RangeStmt:
 		scan.record(expr.X)
-		scan.recordLoop(scan.rangeMayBeEmpty(expr.X), expr.Key, expr.Value, expr.Body)
+		scan.recordLoop(label, scan.rangeMayBeEmpty(expr.X), expr.Key, expr.Value, expr.Body)
+	case *ast.BranchStmt:
+		if expr.Tok == token.BREAK {
+			scan.recordBreak(expr)
+		}
 	case *ast.AssignStmt:
 		scan.recordAssignment(expr)
 	case *ast.ValueSpec:
@@ -127,20 +163,31 @@ func (scan deadlineScan) visit(node ast.Node) bool {
 	return false
 }
 
-func (scan deadlineScan) recordSelect(body *ast.BlockStmt) {
-	entry := scan.fork()
-	clear(scan.channels)
+func (scan *deadlineScan) recordBreak(stmt *ast.BranchStmt) {
+	label := scan.info.Uses[stmt.Label]
+	target := scan.breaks
+	for label != nil && target.label != label {
+		target = target.parent
+	}
+	target.channels = mergeDeadlines(target.channels, scan.channels)
+	scan.channels = nil
+}
+
+func (scan *deadlineScan) recordSelect(body *ast.BlockStmt, label types.Object) {
+	entry := scan.breakable(label)
+	scan.channels = nil
 	// Each clause starts from the same state, and only the selected clause assigns values.
 	for _, stmt := range body.List {
 		branch := entry.fork()
 		branch.record(stmt)
-		maps.Copy(scan.channels, branch.channels)
+		scan.channels = mergeDeadlines(scan.channels, branch.channels)
 	}
+	scan.channels = mergeDeadlines(scan.channels, entry.breaks.channels)
 }
 
-func (scan deadlineScan) recordSwitch(body *ast.BlockStmt) {
-	entry := scan.fork()
-	clear(scan.channels)
+func (scan *deadlineScan) recordSwitch(body *ast.BlockStmt, label types.Object) {
+	entry := scan.breakable(label)
+	scan.channels = nil
 	hasDefault := false
 	var fallingThrough map[types.Object]bool
 	for _, stmt := range body.List {
@@ -162,11 +209,12 @@ func (scan deadlineScan) recordSwitch(body *ast.BlockStmt) {
 			continue
 		}
 		fallingThrough = nil
-		maps.Copy(scan.channels, branch.channels)
+		scan.channels = mergeDeadlines(scan.channels, branch.channels)
 	}
 	if !hasDefault {
-		maps.Copy(scan.channels, entry.channels)
+		scan.channels = mergeDeadlines(scan.channels, entry.channels)
 	}
+	scan.channels = mergeDeadlines(scan.channels, entry.breaks.channels)
 }
 
 func isFallthrough(stmt ast.Stmt) bool {
@@ -196,23 +244,26 @@ func (scan deadlineScan) rangeMayBeEmpty(expr ast.Expr) bool {
 	return true
 }
 
-func (scan deadlineScan) recordLoop(maySkip bool, parts ...ast.Node) {
-	entry := scan.fork()
+func (scan *deadlineScan) recordLoop(label types.Object, maySkip bool, parts ...ast.Node) {
+	entry := scan.breakable(label)
 	for {
+		iteration := entry.fork()
 		for _, part := range parts {
-			scan.record(part)
+			iteration.record(part)
 		}
 		// A deadline assigned on one iteration can reach a receive on the next.
 		previous := len(entry.channels)
-		maps.Copy(entry.channels, scan.channels)
+		maps.Copy(entry.channels, iteration.channels)
 		if len(entry.channels) == previous {
+			scan.channels = iteration.channels
 			if maySkip {
 				// The loop can leave incoming deadlines untouched by skipping its body.
-				maps.Copy(scan.channels, entry.channels)
+				scan.channels = mergeDeadlines(scan.channels, entry.channels)
 			}
+			// Break paths bypass the remaining body and post statement.
+			scan.channels = mergeDeadlines(scan.channels, entry.breaks.channels)
 			return
 		}
-		maps.Copy(scan.channels, entry.channels)
 	}
 }
 
