@@ -26,37 +26,19 @@ func (c flakeChecks) retriesInHeader(loop *ast.ForStmt, parent ast.Node) bool {
 	if iteration.outcomes == nil {
 		return false
 	}
-	// Keep recognizing direct checks in headers with an assignment in the post.
-	// In other loops, require a refreshed result to reach the condition.
-	var attempt ast.Node = loop.Body
-	if post, ok := loop.Post.(*ast.AssignStmt); ok {
-		attempt = post
-	}
-	return iteration.failureCondition(loop.Cond, true, attempt)
-}
-
-func (c flakeChecks) headerCallUsesAttempt(call *ast.CallExpr, attempt ast.Node) bool {
-	if _, hasPostAssignment := attempt.(*ast.AssignStmt); hasPostAssignment {
-		return true
-	}
-	return contains(call, func(node ast.Node) bool {
-		name, ok := node.(*ast.Ident)
-		if !ok {
-			return false
-		}
-		polarity := c.outcomes[c.info.Uses[name]]
-		return polarity != 0 && polarity != shortMode
-	})
+	return iteration.failureCondition(loop.Cond, true, loop.Body)
 }
 
 func (c flakeChecks) retryTupleOutcomes(values []ast.Expr, outcomes []outcomePolarity) {
 	if len(values) != 1 {
 		return
 	}
-	tuple, ok := c.info.TypeOf(values[0]).(*types.Tuple)
-	if !ok {
+	value := values[0]
+	if !c.isCheckCall(value) {
 		return
 	}
+	// A single call assigned to multiple targets has a tuple result.
+	tuple := c.info.TypeOf(value).(*types.Tuple)
 	for i := range outcomes {
 		if isErrorResult(tuple.At(i).Type()) {
 			outcomes[i] = refreshedError
@@ -91,16 +73,23 @@ func (c flakeChecks) failureCondition(condition ast.Expr, failure bool, attempt 
 	case *ast.BinaryExpr:
 		return c.failureComparison(expr, failure, attempt)
 	case *ast.CallExpr:
-		if c.retryHeader && attempt != nil && !c.headerCallUsesAttempt(expr, attempt) {
-			return false
-		}
 		switch {
-		case testingMethod(c.info, expr, "Failed"), packageCall(c.info, expr, "errors", "Is", "As"):
-			return failure
+		case testingMethod(c.info, expr, "Failed"):
+			return failure && (!c.retryHeader || attempt == nil)
+		case packageCall(c.info, expr, "errors", "Is", "As"):
+			// Classifying an error only retries a check if the error is refreshed.
+			return failure && (!c.retryHeader || attempt == nil || c.retryErrorOutcome(expr.Args[0]) != 0)
 		case testingMethod(c.info, expr, "Run"):
 			return !failure
 		case attempt != nil:
-			return !failure && booleanResult(c.info, expr) && !c.isShortMode(expr)
+			if c.retryHeader {
+				// A callback or a method predicate may only be waiting for readiness.
+				fn := calledFunc(c.info, expr)
+				if fn == nil || fn.Signature().Recv() != nil {
+					return false
+				}
+			}
+			return !failure && c.isCheckCall(expr) && booleanResult(c.info, expr) && !c.isShortMode(expr)
 		}
 	case *ast.Ident:
 		polarity := c.outcomes[c.info.ObjectOf(expr)]
@@ -178,7 +167,7 @@ func (c flakeChecks) attemptResult(value ast.Expr, attempt ast.Node) bool {
 	}
 	switch expr := ast.Unparen(value).(type) {
 	case *ast.CallExpr:
-		return !c.retryHeader || c.headerCallUsesAttempt(expr, attempt)
+		return c.isCheckCall(expr)
 	case *ast.Ident:
 		object := c.info.ObjectOf(expr)
 		if c.retryHeader {

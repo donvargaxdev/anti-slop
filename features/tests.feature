@@ -110,6 +110,11 @@ Feature: Test reliability
       }
 
       func check() error { return nil }
+
+      func TestRetryInLoopCondition(t *testing.T) {
+          for attempts := 0; attempts < 3 && check() != nil; attempts++ {
+          }
+      }
       """
     When anti-slop runs with "tests ./..."
     Then it exits with code 0
@@ -127,6 +132,7 @@ Feature: Test reliability
       p_test.go:71:5: tests: skipping after a failure
       p_test.go:79:5: tests: skipping after a failure
       p_test.go:84:5: tests: retrying a check or test body
+      p_test.go:92:5: tests: retrying a check or test body
       """
     And its error output is empty
 

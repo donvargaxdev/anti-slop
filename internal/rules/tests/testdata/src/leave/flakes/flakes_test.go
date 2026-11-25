@@ -1,6 +1,7 @@
 package flakes
 
 import (
+	"errors"
 	"os"
 	"strconv"
 	"testing"
@@ -9,6 +10,8 @@ import (
 type fakeTest struct{}
 
 func (fakeTest) Skip(string) {}
+
+func (fakeTest) Ready() bool { return true }
 
 func TestCases(t *testing.T) {
 	if testing.Short() {
@@ -146,6 +149,61 @@ func TestLoopConditionIsNeverReachedWithUpdatedResult(t *testing.T) {
 		err = check()
 		t.Log(err)
 		break
+	}
+}
+
+func TestFailureConditionWithoutRetry(t *testing.T) {
+	for check() != nil {
+		break
+	}
+	for !testing.Short() {
+		break
+	}
+	for !testing.Short() && available() {
+		t.Log("full run")
+	}
+	err := check()
+	for i := 0; i < 3 && errors.Is(err, os.ErrInvalid); i = i + 1 {
+		t.Log(i)
+	}
+	for t.Failed() {
+		t.Log("already failed")
+	}
+}
+
+func waitForReadiness(ready func() bool, state fakeTest) {
+	for !ready() {
+	}
+	for !state.Ready() {
+	}
+}
+
+func noRetryFromStoredOrUnassignedResult(state struct{ err error }, outcomes map[int]error) {
+	err := check()
+	for err != nil {
+		var unused bool
+		_ = unused
+		err, _ = outcomes[0]
+	}
+	for err != nil {
+		err = state.err
+	}
+}
+
+func TestFailureAfterEmptyRange(t *testing.T) {
+	failed := false
+	for range 0 {
+		failed = t.Failed()
+	}
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func skipOnIndependentField(t *testing.T, state struct{ optional bool }) {
+	optional := state.optional
+	if optional {
+		t.Skip("optional")
 	}
 }
 

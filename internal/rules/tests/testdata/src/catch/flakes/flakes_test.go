@@ -190,6 +190,37 @@ func TestRetryWithDirectCheckAndPostAssignment(t *test.T) {
 	}
 }
 
+func TestRetryInCondition(t *test.T) {
+	for check() != nil { // want "retrying a check or test body"
+	}
+	for attempts := 0; attempts < 3 && check() != nil; attempts++ { // want "retrying a check or test body"
+	}
+	for !probe() { // want "retrying a check or test body"
+	}
+	for errors.Is(check(), errors.ErrUnsupported) { // want "retrying a check or test body"
+	}
+	for !t.Run("attempt", body) { // want "retrying a check or test body"
+	}
+}
+
+func retryUntilElseSucceeds() {
+	for range 3 { // want "retrying a check or test body"
+		if err := check(); err != nil {
+			continue
+		} else {
+			break
+		}
+	}
+}
+
+func retryWithLargeUnsignedBound() {
+	for range uint64(1) << 63 { // want "retrying a check or test body"
+		if check() == nil {
+			break
+		}
+	}
+}
+
 func TestRetryAssignedCheck(t *test.T) {
 	var err error
 	for range 3 { // want "retrying a check or test body"
