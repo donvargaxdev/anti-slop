@@ -875,3 +875,15 @@ func TestIndependentImmediateCalls(t *testing.T) {
 		}()
 	}
 }
+
+func TestImmediateCallBindsLaterArgumentAfterSideEffects(t *testing.T) {
+	failed := t.Failed()
+	func(_ bool, failed bool) {
+		if failed {
+			t.Skip("optional")
+		}
+	}(func() bool {
+		failed = false
+		return true
+	}(), failed && true)
+}

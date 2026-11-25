@@ -213,19 +213,32 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 }
 
 func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit, visit func(flakeChecks, ast.Node, ast.Node) bool) {
-	for _, arg := range call.Args {
-		c.walk(arg, visit)
-	}
+	outcomes := c.assignmentOutcomes(call.Args, len(call.Args), visit)
 	if !visit(*c, literal, call) {
 		return
 	}
 	body := c.fork()
+	signature := c.info.TypeOf(literal).(*types.Signature)
+	params := signature.Params()
+	fixed := params.Len()
+	if signature.Variadic() {
+		// Variadic arguments populate a slice rather than a scalar outcome.
+		fixed--
+	}
+	for i := range min(fixed, len(outcomes)) {
+		if outcomes[i] != 0 {
+			body.outcomes[params.At(i)] = outcomes[i]
+		}
+	}
 	var returns flakeFlow
 	body.returns = &returns
 	body.walk(literal.Body, visit)
 	// Explicit returns and fallthrough both resume the caller. A testing
 	// termination inside the literal may belong to a different test.
 	if outcomes := mergeOutcomes(returns.outcomes, body.outcomes); outcomes != nil {
+		for param := range params.Variables() {
+			delete(outcomes, param)
+		}
 		c.outcomes = outcomes
 	}
 }

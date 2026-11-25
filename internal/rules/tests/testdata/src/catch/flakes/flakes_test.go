@@ -913,3 +913,36 @@ func TestDelayedClosureDoesNotClearFailure(t *test.T) {
 		t.Skip("failed") // want "skipping after a failure"
 	}
 }
+
+func TestSkipOnImmediateFailureParameter(t *test.T) {
+	func(failed bool) {
+		if failed {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+	}(t.Failed())
+}
+
+func TestSkipOnImmediateParameterBeforeLaterArgument(t *test.T) {
+	passed := t.Run("setup", body)
+	(func(_ bool, passed, unused bool, _ ...string) {
+		if !passed {
+			t.SkipNow() // want "skipping after a failure"
+		}
+	})(true, passed || false, func() bool {
+		passed = true
+		return true
+	}(), "detail")
+}
+
+func TestImmediateParameterAssignmentLeavesCallerFailure(t *test.T) {
+	failed := t.Failed()
+	func(failed bool) {
+		failed = false
+		if failed {
+			t.Skip("optional")
+		}
+	}(failed)
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
