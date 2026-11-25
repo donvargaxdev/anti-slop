@@ -305,6 +305,31 @@ func TestSkipBeforeCleanupAssignsFailure(t *testing.T) {
 	}
 }
 
+func TestSkipInDelayedCalls(t *testing.T) {
+	if t.Failed() {
+		defer func() { t.Skip("deferred") }()
+		go func() { t.Skip("goroutine") }()
+		t.Cleanup(func() { t.Skip("cleanup") })
+		callback := func() { t.Skip("registered cleanup") }
+		t.Cleanup(callback)
+	}
+}
+
+func delayedSkip(t *testing.T) func() {
+	if t.Failed() {
+		return func() { t.Skip("later") }
+	}
+	return nil
+}
+
+func TestSkipInUnguardedImmediateCall(t *testing.T) {
+	func() {
+		if testing.Short() {
+			t.Skip("optional test")
+		}
+	}()
+}
+
 func TestStopOnStoredFailure(t *testing.T) {
 	outcome := t.Run("setup", func(t *testing.T) {})
 	for i := range 3 {

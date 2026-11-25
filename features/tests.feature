@@ -115,6 +115,14 @@ Feature: Test reliability
           for attempts := 0; attempts < 3 && check() != nil; attempts++ {
           }
       }
+
+      func TestSkipInImmediateCall(t *testing.T) {
+          if t.Failed() {
+              func() {
+                  t.Skip("failed")
+              }()
+          }
+      }
       """
     When anti-slop runs with "tests ./..."
     Then it exits with code 0
@@ -133,6 +141,7 @@ Feature: Test reliability
       p_test.go:79:5: tests: skipping after a failure
       p_test.go:84:5: tests: retrying a check or test body
       p_test.go:92:5: tests: retrying a check or test body
+      p_test.go:99:13: tests: skipping after a failure
       """
     And its error output is empty
 

@@ -171,7 +171,9 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 			return false
 		case *ast.FuncLit:
 			body := c.fork()
-			body.failureGuard = false
+			if !calledImmediately(stmt, parents) {
+				body.failureGuard = false
+			}
 			body.walk(stmt.Body, visit)
 			return false
 		case *ast.AssignStmt:
@@ -189,6 +191,27 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 		}
 		return true
 	})
+}
+
+func calledImmediately(literal *ast.FuncLit, parents []ast.Node) bool {
+	for i := len(parents) - 1; i >= 0; i-- {
+		if _, ok := parents[i].(*ast.ParenExpr); ok {
+			continue
+		}
+		call, ok := parents[i].(*ast.CallExpr)
+		if !ok || ast.Unparen(call.Fun) != literal {
+			return false
+		}
+		// Only the outer call is delayed. Its arguments are evaluated now.
+		if i > 0 {
+			switch parents[i-1].(type) {
+			case *ast.DeferStmt, *ast.GoStmt:
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func (c flakeChecks) fork() *flakeChecks {

@@ -381,6 +381,36 @@ func TestSkipOnCapturedFailure(t *test.T) {
 	})
 }
 
+func TestSkipInImmediateCall(t *test.T) {
+	if t.Failed() {
+		func() {
+			t.Skip("failed") // want "skipping after a failure"
+		}()
+		(func() {
+			t.SkipNow() // want "skipping after a failure"
+		})()
+	}
+}
+
+func TestSkipInImmediateArgument(t *test.T) {
+	if t.Failed() {
+		defer t.Log(func() string {
+			t.Skip("failed") // want "skipping after a failure"
+			return ""
+		}())
+	}
+}
+
+func skipInImmediateResult(t *test.T) bool {
+	if t.Failed() {
+		return func() bool {
+			t.Skip("failed") // want "skipping after a failure"
+			return false
+		}()
+	}
+	return true
+}
+
 func TestSkipOnSwappedOutcome(t *test.T) {
 	failed := t.Failed()
 	other := false
