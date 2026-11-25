@@ -645,6 +645,51 @@ func TestImmediateCallInstallsDeadline(t *testing.T) {
 	}
 }
 
+func TestDeadlineInImmediateCall(t *testing.T) {
+	deadline := After(Millisecond)
+	for range 3 { // want "polling against the wall clock"
+		(func() {
+			func() { <-deadline }()
+		})()
+	}
+}
+
+func TestDeadlineInImmediateCondition(t *testing.T) {
+	for func() bool { return (<-After(Millisecond)).IsZero() }() { // want "polling against the wall clock"
+	}
+}
+
+func TestDeadlineInImmediatePost(t *testing.T) {
+	for i := 0; i < 3; func() { <-After(Millisecond); i++ }() { // want "polling against the wall clock"
+	}
+}
+
+func TestClockGuardInsideImmediateCall(t *testing.T) {
+	start := Now()
+	for range 3 { // want "polling against the wall clock"
+		func() {
+			if Since(start) > Second {
+				t.Fatalf("timeout")
+			}
+		}()
+	}
+}
+
+func TestClockGuardCallsImmediateTestExit(t *testing.T) {
+	start := Now()
+	for range 3 { // want "polling against the wall clock"
+		if Since(start) > Second {
+			func() { t.SkipNow() }()
+		}
+	}
+}
+
+func TestDeadlineInDeferredCallArgument(t *testing.T) {
+	for range 3 { // want "polling against the wall clock"
+		defer t.Log(func() Time { return <-After(Millisecond) }())
+	}
+}
+
 func TestDeferredCallDoesNotReplaceDeadline(t *testing.T) {
 	ready := make(chan Time)
 	close(ready)

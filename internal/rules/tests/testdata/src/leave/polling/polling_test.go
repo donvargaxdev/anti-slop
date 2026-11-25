@@ -618,3 +618,24 @@ func TestReceiveAfterImmediateSkip(t *testing.T) {
 		<-ch
 	}
 }
+
+func TestDelayedCallsDoNotPollEnclosingLoop(t *testing.T) {
+	for range 3 {
+		defer (func() { <-time.After(time.Millisecond) })()
+		go func() { <-time.After(time.Millisecond) }()
+		_ = func() { <-time.After(time.Millisecond) }
+		func(func()) {}(func() { <-time.After(time.Millisecond) })
+	}
+}
+
+func TestClockGuardOnlyReturnsFromImmediateCall(t *testing.T) {
+	start := time.Now()
+	for range 3 {
+		func() {
+			if time.Since(start) > time.Second {
+				return
+			}
+			t.Log("still within budget")
+		}()
+	}
+}

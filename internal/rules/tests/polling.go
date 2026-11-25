@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"maps"
+	"slices"
 
 	"golang.org/x/tools/go/analysis"
 )
@@ -488,11 +489,7 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 	if readsClock(info, condition) {
 		return true
 	}
-	receivesDeadline := func(node ast.Node) bool {
-		receive, ok := node.(*ast.UnaryExpr)
-		return ok && receives[receive]
-	}
-	if contains(condition, receivesDeadline) || contains(post, receivesDeadline) {
+	if pollsIn(info, condition, receives, nil) || pollsIn(info, post, receives, nil) {
 		return true
 	}
 
@@ -518,7 +515,7 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 		}
 		clockInHeader = clockInHeader || usesTrackedValue(info, condition, iteration.tracked)
 	})
-	return clockInHeader || scan.continuations.bypassesExit || pollsInBody(info, body, receives, scan.clockGuards)
+	return clockInHeader || scan.continuations.bypassesExit || pollsIn(info, body, receives, scan.clockGuards)
 }
 
 func usesTrackedValue(info *types.Info, expr ast.Expr, tracked map[types.Object]bool) bool {
@@ -548,27 +545,56 @@ func afterDeadline(info *types.Info, expr ast.Expr, deadlines map[types.Object]b
 	return false
 }
 
-func pollsInBody(info *types.Info, body *ast.BlockStmt, receives map[*ast.UnaryExpr]bool, clockGuards map[ast.Node]bool) bool {
+func pollsIn(info *types.Info, root ast.Node, receives map[*ast.UnaryExpr]bool, clockGuards map[ast.Node]bool) bool {
+	if root == nil {
+		return false
+	}
 	found := false
-	ast.PreorderStack(body, nil, func(node ast.Node, parents []ast.Node) bool {
+	ast.PreorderStack(root, nil, func(node ast.Node, parents []ast.Node) bool {
 		if found {
 			return false
 		}
 		switch expr := node.(type) {
-		case *ast.ForStmt, *ast.RangeStmt, *ast.FuncLit:
+		case *ast.ForStmt, *ast.RangeStmt:
 			return false
+		case *ast.FuncLit:
+			return invokesLiteral(expr, parents)
 		case *ast.UnaryExpr:
 			found = receives[expr]
 		case *ast.ReturnStmt:
-			found = guardedByClock(parents, clockGuards)
+			found = guardedByClock(parents, clockGuards) && !slices.ContainsFunc(parents, isFunctionLiteral)
 		case *ast.BranchStmt:
-			found = expr.Tok == token.BREAK && breaksLoop(info, expr, body, parents) && guardedByClock(parents, clockGuards)
+			found = expr.Tok == token.BREAK && guardedByClock(parents, clockGuards) && breaksLoop(info, expr, root, parents)
 		case *ast.ExprStmt:
 			found = endsTest(info, expr.X) && guardedByClock(parents, clockGuards)
 		}
 		return !found
 	})
 	return found
+}
+
+func invokesLiteral(literal *ast.FuncLit, parents []ast.Node) bool {
+	// Skip parentheses to check whether the literal is the callee.
+	for i := len(parents) - 1; i >= 0; i-- {
+		if _, paren := parents[i].(*ast.ParenExpr); paren {
+			continue
+		}
+		call, ok := parents[i].(*ast.CallExpr)
+		if !ok {
+			break
+		}
+		var enclosing ast.Node
+		if i > 0 {
+			enclosing = parents[i-1]
+		}
+		return immediateLiteral(call, enclosing) == literal
+	}
+	return false
+}
+
+func isFunctionLiteral(node ast.Node) bool {
+	_, ok := node.(*ast.FuncLit)
+	return ok
 }
 
 func endsTest(info *types.Info, expr ast.Expr) bool {
@@ -585,10 +611,10 @@ func guardedByClock(parents []ast.Node, clockGuards map[ast.Node]bool) bool {
 	return false
 }
 
-func breaksLoop(info *types.Info, branch *ast.BranchStmt, body *ast.BlockStmt, parents []ast.Node) bool {
+func breaksLoop(info *types.Info, branch *ast.BranchStmt, root ast.Node, parents []ast.Node) bool {
 	if branch.Label != nil {
 		// A break to a label outside the body also leaves this loop.
-		return info.Uses[branch.Label].Pos() < body.Pos()
+		return info.Uses[branch.Label].Pos() < root.Pos()
 	}
 	for _, node := range parents {
 		switch node.(type) {
