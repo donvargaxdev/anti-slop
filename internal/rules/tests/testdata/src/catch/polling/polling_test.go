@@ -60,6 +60,16 @@ func TestPoll(t *testing.T) {
 	}
 }
 
+func pollDeadlineInCondition() {
+	for (<-After(Millisecond)).IsZero() { // want "polling against the wall clock"
+	}
+}
+
+func pollDeadlineInPost(ready func() bool) {
+	for ; !ready(); <-After(Millisecond) { // want "polling against the wall clock"
+	}
+}
+
 func TestPollWithDeadline(t *testing.T) {
 	expiry := After(Second)
 	var deadline = expiry

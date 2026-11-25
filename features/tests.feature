@@ -79,6 +79,13 @@ Feature: Test reliability
               t.Fatal("timeout")
           }
       }
+
+      func pollHeader(ready func() bool) {
+          for (<-time.After(time.Millisecond)).IsZero() {
+          }
+          for ; !ready(); <-time.After(time.Millisecond) {
+          }
+      }
       """
     When anti-slop runs with "tests ./..."
     Then it exits with code 0
@@ -91,6 +98,8 @@ Feature: Test reliability
       p_test.go:29:5: tests: polling against the wall clock
       p_test.go:46:9: tests: skipping after a failure
       p_test.go:52:5: tests: polling against the wall clock
+      p_test.go:61:5: tests: polling against the wall clock
+      p_test.go:63:5: tests: polling against the wall clock
       """
     And its error output is empty
 

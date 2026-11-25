@@ -94,6 +94,24 @@ func TestClockSnapshotAndUnrelatedRefresh(t *testing.T) {
 	}
 }
 
+func receiveDeadlineDuringInitialization(ready func() bool) {
+	for <-time.After(time.Millisecond); !ready(); {
+	}
+}
+
+func receiveOnLoopExit() {
+	for ; ; <-time.After(time.Millisecond) {
+		break
+	}
+}
+
+func receiveReadinessInHeader(ready <-chan time.Time, done func() bool) {
+	for (<-ready).IsZero() {
+	}
+	for ; !done(); <-ready {
+	}
+}
+
 func TestDeadlineReassignedToReady(t *testing.T) {
 	ready := make(chan time.Time)
 	close(ready)

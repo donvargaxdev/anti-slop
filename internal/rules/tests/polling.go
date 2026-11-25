@@ -428,6 +428,13 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 	if readsClock(info, condition) {
 		return true
 	}
+	receivesDeadline := func(node ast.Node) bool {
+		receive, ok := node.(*ast.UnaryExpr)
+		return ok && receives[receive]
+	}
+	if contains(condition, receivesDeadline) || contains(post, receivesDeadline) {
+		return true
+	}
 
 	var label types.Object
 	if labeled, ok := parents[len(parents)-1].(*ast.LabeledStmt); ok {
