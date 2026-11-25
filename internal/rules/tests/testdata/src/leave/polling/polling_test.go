@@ -335,3 +335,37 @@ func TestLoopShadowsSample(t *testing.T) {
 		t.Log(now)
 	}
 }
+
+func TestStoredTimingOnlyForLog(t *testing.T) {
+	start := time.Now()
+	for range 3 {
+		elapsed := time.Since(start)
+		if elapsed > time.Second {
+			t.Log("slow")
+		}
+		if t.Failed() {
+			t.Fatalf("failed after %v", elapsed)
+		}
+	}
+}
+
+func TestStoredSampleReplacedBeforeExit(t *testing.T) {
+	start := time.Now()
+	for range 3 {
+		elapsed := time.Since(start)
+		t.Log(elapsed)
+		elapsed = time.Second
+		if elapsed > time.Second {
+			t.Fatal("timeout")
+		}
+	}
+}
+
+func TestSnapshotBeforeLoop(t *testing.T) {
+	elapsed := time.Since(time.Time{})
+	for range 3 {
+		if elapsed < time.Second {
+			t.Fatal("unexpected initial duration")
+		}
+	}
+}

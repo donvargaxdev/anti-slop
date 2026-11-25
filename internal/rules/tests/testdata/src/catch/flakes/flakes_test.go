@@ -313,3 +313,14 @@ func TestSkipAfterFallthrough(t *test.T) {
 		}
 	}
 }
+
+func skipAfterSelect(t *test.T, gate <-chan bool) {
+	failed := t.Failed()
+	select {
+	case failed = <-gate:
+	default:
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}

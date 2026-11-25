@@ -413,3 +413,27 @@ poll:
 		elapsed = Second
 	}
 }
+
+func TestPollWithStoredSample(t *testing.T) {
+	start := Now()
+	for { // want "polling against the wall clock"
+		elapsed := Since(start)
+		if elapsed > Second {
+			t.Fatal("timeout")
+		}
+	}
+}
+
+func TestPollWithConditionAssignedInBranch(t *testing.T) {
+	start := Now()
+	for range 3 { // want "polling against the wall clock"
+		expired := false
+		if testing.Short() {
+			elapsed := Since(start)
+			expired = elapsed > Second
+		}
+		if expired {
+			return
+		}
+	}
+}

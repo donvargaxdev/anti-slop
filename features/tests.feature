@@ -50,9 +50,23 @@ Feature: Test reliability
       func TestTimeout(t *testing.T) {
           started := time.Now()
           for {
-              if elapsed := time.Since(started); elapsed > time.Second {
+              elapsed := time.Since(started)
+              if elapsed > time.Second {
                   t.Fatal("timeout")
               }
+          }
+      }
+
+      func TestSelect(t *testing.T) {
+          gate := make(chan struct{})
+          failed := t.Failed()
+          select {
+          case <-gate:
+              failed = false
+          default:
+          }
+          if failed {
+              t.Skip("failed")
           }
       }
       """
@@ -65,6 +79,7 @@ Feature: Test reliability
       p_test.go:21:9: tests: os.Setenv changes the process environment in test code
       p_test.go:23:9: tests: skipping after a failure
       p_test.go:29:5: tests: polling against the wall clock
+      p_test.go:46:9: tests: skipping after a failure
       """
     And its error output is empty
 

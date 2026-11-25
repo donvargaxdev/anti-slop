@@ -232,3 +232,31 @@ func TestSkipAfterFallthroughClearsFailure(t *testing.T) {
 		t.Skip("optional test")
 	}
 }
+
+func skipAfterEverySelectClauseClearsFailure(t *testing.T, gate <-chan bool) {
+	failed := t.Failed()
+	select {
+	case failed = <-gate:
+		if failed {
+			t.Skip("optional test")
+		}
+	case <-t.Context().Done():
+		failed = false
+	}
+	if failed {
+		t.Skip("optional test")
+	}
+}
+
+func skipInIndependentSelectClause(t *testing.T, gate <-chan struct{}) {
+	var failed bool
+	select {
+	case <-gate:
+		failed = t.Failed()
+	default:
+		if failed {
+			t.Skip("optional test")
+		}
+	}
+	_ = failed
+}

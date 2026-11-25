@@ -109,6 +109,9 @@ func (c flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.N
 			c.walk(stmt.Assign, visit)
 			c.walkCases(stmt.Body, visit)
 			return false
+		case *ast.SelectStmt:
+			c.walkCommunications(stmt.Body, visit)
+			return false
 		case *ast.FuncLit:
 			body := c
 			body.outcomes = maps.Clone(c.outcomes)
@@ -129,6 +132,19 @@ func (c flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.N
 		}
 		return true
 	})
+}
+
+func (c flakeChecks) walkCommunications(body *ast.BlockStmt, visit func(flakeChecks, ast.Node, ast.Node) bool) {
+	merged := make(map[types.Object]outcomePolarity)
+	for _, clause := range body.List {
+		branch := c
+		branch.outcomes = maps.Clone(c.outcomes)
+		branch.walk(clause, visit)
+		mergeOutcomes(merged, branch.outcomes)
+	}
+	// Only a selected clause can reach the statement after the select.
+	clear(c.outcomes)
+	mergeOutcomes(c.outcomes, merged)
 }
 
 func (c flakeChecks) walkCases(body *ast.BlockStmt, visit func(flakeChecks, ast.Node, ast.Node) bool) {

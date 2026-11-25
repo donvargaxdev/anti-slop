@@ -21,18 +21,7 @@ func runPolling(pass *analysis.Pass) (any, error) {
 	receives := deadlineReceives(pass)
 	visitTestFiles(pass, func(file *ast.File) {
 		ast.PreorderStack(file, nil, func(node ast.Node, parents []ast.Node) bool {
-			var pollsInCondition bool
-			var body *ast.BlockStmt
-			switch loop := node.(type) {
-			case *ast.ForStmt:
-				body = loop.Body
-				pollsInCondition = readsClock(info, loop.Cond) || clockFeedsCondition(info, loop, parents[len(parents)-1])
-			case *ast.RangeStmt:
-				body = loop.Body
-			default:
-				return true
-			}
-			if pollsInCondition || pollsInBody(info, body, receives) {
+			if pollsInLoop(info, node, parents, receives) {
 				report(pass, node, "polling against the wall clock")
 			}
 			return true
@@ -44,10 +33,11 @@ func runPolling(pass *analysis.Pass) (any, error) {
 type pollingScan struct {
 	info *types.Info
 	// A nil map marks a path that branched away.
-	tracked   map[types.Object]bool
-	dependsOn func(ast.Expr, map[types.Object]bool) bool
-	receives  map[*ast.UnaryExpr]bool
-	target    *branchTarget
+	tracked     map[types.Object]bool
+	dependsOn   func(ast.Expr, map[types.Object]bool) bool
+	receives    map[*ast.UnaryExpr]bool
+	clockGuards map[*ast.IfStmt]bool
+	target      *branchTarget
 }
 
 type branchTarget struct {
@@ -126,6 +116,9 @@ func (scan *pollingScan) visit(node ast.Node) bool {
 		body.record(expr.Body)
 	case *ast.IfStmt:
 		scan.record(expr.Init)
+		if scan.clockGuards != nil && scan.dependsOn(expr.Cond, scan.tracked) {
+			scan.clockGuards[expr] = true
+		}
 		scan.record(expr.Cond)
 		other := scan.fork()
 		scan.record(expr.Body)
@@ -336,27 +329,46 @@ func (scan pollingScan) store(name *ast.Ident, tracked bool) {
 	}
 }
 
-func clockFeedsCondition(info *types.Info, loop *ast.ForStmt, parent ast.Node) bool {
-	if loop.Cond == nil {
+func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives map[*ast.UnaryExpr]bool) bool {
+	var body *ast.BlockStmt
+	var condition ast.Expr
+	var post ast.Stmt
+	switch loop := node.(type) {
+	case *ast.ForStmt:
+		body, condition, post = loop.Body, loop.Cond, loop.Post
+	case *ast.RangeStmt:
+		body = loop.Body
+	default:
 		return false
 	}
+	if readsClock(info, condition) {
+		return true
+	}
+
 	target := &branchTarget{isLoop: true}
-	if labeled, ok := parent.(*ast.LabeledStmt); ok {
+	if labeled, ok := parents[len(parents)-1].(*ast.LabeledStmt); ok {
 		target.label = info.Defs[labeled.Label]
 	}
-	// Only samples refreshed on the way to the next condition count.
+	// Start with an empty state so a fixed snapshot taken before the loop does
+	// not count as polling. Record each guard with the values that reach it.
 	scan := pollingScan{
 		info:    info,
 		tracked: make(map[types.Object]bool),
 		dependsOn: func(expr ast.Expr, tracked map[types.Object]bool) bool {
 			return readsClock(info, expr) || usesTrackedValue(info, expr, tracked)
 		},
-		target: target,
+		clockGuards: make(map[*ast.IfStmt]bool),
+		target:      target,
 	}
-	scan.record(loop.Body)
-	scan.tracked = mergeTracked(scan.tracked, target.continues)
-	scan.record(loop.Post)
-	return usesTrackedValue(info, loop.Cond, scan.tracked)
+	scan.record(body)
+	if condition != nil {
+		scan.tracked = mergeTracked(scan.tracked, target.continues)
+		scan.record(post)
+		if usesTrackedValue(info, condition, scan.tracked) {
+			return true
+		}
+	}
+	return pollsInBody(info, body, receives, scan.clockGuards)
 }
 
 func usesTrackedValue(info *types.Info, expr ast.Expr, tracked map[types.Object]bool) bool {
@@ -386,7 +398,7 @@ func afterDeadline(info *types.Info, expr ast.Expr, deadlines map[types.Object]b
 	return false
 }
 
-func pollsInBody(info *types.Info, body *ast.BlockStmt, receives map[*ast.UnaryExpr]bool) bool {
+func pollsInBody(info *types.Info, body *ast.BlockStmt, receives map[*ast.UnaryExpr]bool, clockGuards map[*ast.IfStmt]bool) bool {
 	found := false
 	ast.PreorderStack(body, nil, func(node ast.Node, parents []ast.Node) bool {
 		if found {
@@ -398,13 +410,13 @@ func pollsInBody(info *types.Info, body *ast.BlockStmt, receives map[*ast.UnaryE
 		case *ast.UnaryExpr:
 			found = receives[expr]
 		case *ast.ReturnStmt:
-			found = guardedByClock(info, parents)
+			found = guardedByClock(parents, clockGuards)
 		case *ast.BranchStmt:
-			found = expr.Tok == token.BREAK && breaksLoop(info, expr, body, parents) && guardedByClock(info, parents)
+			found = expr.Tok == token.BREAK && breaksLoop(info, expr, body, parents) && guardedByClock(parents, clockGuards)
 		case *ast.ExprStmt:
 			if call, ok := ast.Unparen(expr.X).(*ast.CallExpr); ok &&
 				testingMethod(info, call, "Fatal", "Fatalf", "FailNow") {
-				found = guardedByClock(info, parents)
+				found = guardedByClock(parents, clockGuards)
 			}
 		}
 		return !found
@@ -412,31 +424,9 @@ func pollsInBody(info *types.Info, body *ast.BlockStmt, receives map[*ast.UnaryE
 	return found
 }
 
-func guardedByClock(info *types.Info, parents []ast.Node) bool {
+func guardedByClock(parents []ast.Node, clockGuards map[*ast.IfStmt]bool) bool {
 	for _, node := range parents {
-		if stmt, ok := node.(*ast.IfStmt); ok &&
-			(readsClock(info, stmt.Cond) || usesClockAssignment(info, stmt.Cond, stmt.Init)) {
-			return true
-		}
-	}
-	return false
-}
-
-func usesClockAssignment(info *types.Info, condition ast.Expr, stmt ast.Stmt) bool {
-	assignment, ok := stmt.(*ast.AssignStmt)
-	if !ok || len(assignment.Lhs) != len(assignment.Rhs) {
-		return false
-	}
-	for i, value := range assignment.Rhs {
-		ident, ok := ast.Unparen(assignment.Lhs[i]).(*ast.Ident)
-		if !ok || ident.Name == "_" || !readsClock(info, value) {
-			continue
-		}
-		object := info.ObjectOf(ident)
-		if contains(condition, func(node ast.Node) bool {
-			use, ok := node.(*ast.Ident)
-			return ok && info.Uses[use] == object
-		}) {
+		if stmt, ok := node.(*ast.IfStmt); ok && clockGuards[stmt] {
 			return true
 		}
 	}
