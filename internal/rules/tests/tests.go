@@ -87,17 +87,77 @@ func immediateLiteral(call *ast.CallExpr, parent ast.Node) *ast.FuncLit {
 	return literal
 }
 
+// pointerAliases records possible sources for named pointers across assignments.
+// A call through an alias can write any of its targets, including after a branch.
+type pointerAliases map[types.Object][]ast.Expr
+
+func indexPointerAliases(info *types.Info, files []*ast.File) pointerAliases {
+	aliases := make(pointerAliases)
+	record := func(target ast.Expr, source ast.Expr) {
+		name, ok := ast.Unparen(target).(*ast.Ident)
+		if !ok {
+			return
+		}
+		object, ok := info.ObjectOf(name).(*types.Var)
+		if !ok {
+			return
+		}
+		if _, pointer := object.Type().Underlying().(*types.Pointer); pointer {
+			aliases[object] = append(aliases[object], source)
+		}
+	}
+	for _, file := range files {
+		for node := range ast.Preorder(file) {
+			switch stmt := node.(type) {
+			case *ast.AssignStmt:
+				if len(stmt.Lhs) == len(stmt.Rhs) {
+					for i, target := range stmt.Lhs {
+						record(target, stmt.Rhs[i])
+					}
+				}
+			case *ast.ValueSpec:
+				if len(stmt.Names) == len(stmt.Values) {
+					for i, name := range stmt.Names {
+						record(name, stmt.Values[i])
+					}
+				}
+			}
+		}
+	}
+	return aliases
+}
+
+func (aliases pointerAliases) visitTargets(info *types.Info, args []ast.Expr, visit func(types.Object)) {
+	seen := make(map[types.Object]bool)
+	var resolve func(ast.Expr)
+	resolve = func(expr ast.Expr) {
+		if target := addressedVariable(info, expr); target != nil {
+			visit(target)
+			return
+		}
+		if name, ok := ast.Unparen(expr).(*ast.Ident); ok {
+			object := info.Uses[name]
+			if seen[object] {
+				return
+			}
+			seen[object] = true
+			for _, source := range aliases[object] {
+				resolve(source)
+			}
+		}
+	}
+	for _, arg := range args {
+		resolve(arg)
+	}
+}
+
 // After evaluating the arguments, a call can write through their addresses.
-func forgetCallWrites[V any](info *types.Info, call *ast.CallExpr, parent ast.Node, tracked map[types.Object]V) {
+func forgetCallWrites[V any](info *types.Info, aliases pointerAliases, call *ast.CallExpr, parent ast.Node, tracked map[types.Object]V) {
 	callee := info.Types[call.Fun]
 	if _, deferred := parent.(*ast.DeferStmt); deferred || callee.IsType() || callee.IsBuiltin() {
 		return
 	}
-	for _, arg := range call.Args {
-		if object := addressedVariable(info, arg); object != nil {
-			delete(tracked, object)
-		}
-	}
+	aliases.visitTargets(info, call.Args, func(object types.Object) { delete(tracked, object) })
 }
 
 func addressedVariable(info *types.Info, expr ast.Expr) types.Object {
@@ -110,7 +170,7 @@ func addressedVariable(info *types.Info, expr ast.Expr) types.Object {
 }
 
 // deferredWrites identifies variables that a function's defers may change on exit.
-func deferredWrites(info *types.Info, body *ast.BlockStmt) map[types.Object]bool {
+func deferredWrites(info *types.Info, aliases pointerAliases, body *ast.BlockStmt) map[types.Object]bool {
 	writes := make(map[types.Object]bool)
 	ast.PreorderStack(body, nil, func(node ast.Node, _ []ast.Node) bool {
 		switch stmt := node.(type) {
@@ -120,11 +180,7 @@ func deferredWrites(info *types.Info, body *ast.BlockStmt) map[types.Object]bool
 			if literal, ok := ast.Unparen(stmt.Call.Fun).(*ast.FuncLit); ok {
 				maps.Copy(writes, mutableVariables(info, literal.Body))
 			}
-			for _, arg := range stmt.Call.Args {
-				if object := addressedVariable(info, arg); object != nil {
-					writes[object] = true
-				}
-			}
+			aliases.visitTargets(info, stmt.Call.Args, func(object types.Object) { writes[object] = true })
 		}
 		return true
 	})

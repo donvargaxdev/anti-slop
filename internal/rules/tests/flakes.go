@@ -24,6 +24,7 @@ type flakeChecks struct {
 	callOutcomes map[*ast.CallExpr]outcomePolarity
 	sharedErrors map[types.Object]bool
 	mutableVars  map[types.Object]bool
+	aliases      pointerAliases
 	retry        *retryScan
 	successCase  bool
 	retryHeader  bool
@@ -65,6 +66,7 @@ func runFlakes(pass *analysis.Pass) (any, error) {
 		info:         info,
 		flakeFlow:    flakeFlow{outcomes: make(map[types.Object]outcomePolarity)},
 		callOutcomes: make(map[*ast.CallExpr]outcomePolarity),
+		aliases:      indexPointerAliases(info, pass.Files),
 	}
 	reported := make(map[token.Pos]bool)
 	reportOnce := func(node ast.Node, reason string) {
@@ -257,12 +259,12 @@ func (c *flakeChecks) walkCall(call *ast.CallExpr, parent ast.Node, visit func(f
 	for _, arg := range call.Args {
 		c.walk(arg, visit)
 	}
-	forgetCallWrites(c.info, call, parent, c.outcomes)
+	forgetCallWrites(c.info, c.aliases, call, parent, c.outcomes)
 }
 
 func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit, visit func(flakeChecks, ast.Node, ast.Node) bool) {
 	outcomes := c.assignmentOutcomes(call.Args, len(call.Args), visit)
-	forgetCallWrites(c.info, call, nil, c.outcomes)
+	forgetCallWrites(c.info, c.aliases, call, nil, c.outcomes)
 	if !visit(*c, literal, call) {
 		return
 	}
@@ -294,7 +296,7 @@ func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit
 		}
 	}
 	body.walk(literal.Body, visit)
-	writes := deferredWrites(c.info, literal.Body)
+	writes := deferredWrites(c.info, c.aliases, literal.Body)
 	if returns.result != nil {
 		if writes[returns.result] {
 			delete(c.callOutcomes, call)
@@ -314,7 +316,7 @@ func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit
 		for object := range writes {
 			delete(outcomes, object)
 		}
-		forgetCallWrites(c.info, call, nil, outcomes)
+		forgetCallWrites(c.info, c.aliases, call, nil, outcomes)
 		c.outcomes = outcomes
 	}
 }

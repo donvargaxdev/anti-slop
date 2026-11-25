@@ -320,6 +320,15 @@ Feature: Test reliability
 
       func forceFlag(flag *bool) { *flag = true }
 
+      func TestSkipAfterOverwritingFlagThroughAlias(t *testing.T) {
+          failed := t.Failed()
+          p := &failed
+          forceFlag(p)
+          if failed {
+              t.Skip("optional")
+          }
+      }
+
       func TestSkipAfterSuccessfulCheck(t *testing.T) {
           if err := check(); errors.Is(err, nil) {
               t.Skip("optional")

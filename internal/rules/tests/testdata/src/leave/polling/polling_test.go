@@ -883,6 +883,20 @@ func TestReceiveAfterHelperReplacesDeadline(t *testing.T) {
 
 func replaceDeadline(ch *<-chan time.Time, ready <-chan time.Time) { *ch = ready }
 
+func TestReceiveAfterHelperReplacesDeadlineThroughAlias(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	var p *<-chan time.Time
+	p = &ch
+	var copyOfPointer = p
+	p = copyOfPointer
+	replaceDeadline(copyOfPointer, ready)
+	for range 3 {
+		<-ch
+	}
+}
+
 func TestReceiveAfterImmediateClosureReplacesDeadline(t *testing.T) {
 	ready := make(chan time.Time)
 	close(ready)

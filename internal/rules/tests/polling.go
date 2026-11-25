@@ -19,10 +19,11 @@ var Polling = &analysis.Analyzer{
 
 func runPolling(pass *analysis.Pass) (any, error) {
 	info := pass.TypesInfo
-	receives := deadlineReceives(pass)
+	aliases := indexPointerAliases(info, pass.Files)
+	receives := deadlineReceives(pass, aliases)
 	visitTestFiles(pass, func(file *ast.File) {
 		ast.PreorderStack(file, nil, func(node ast.Node, parents []ast.Node) bool {
-			if pollsInLoop(info, node, parents, receives) {
+			if pollsInLoop(info, node, parents, receives, aliases) {
 				report(pass, node, "polling against the wall clock")
 			}
 			return true
@@ -36,6 +37,7 @@ type pollingScan struct {
 	pollingFlow
 	dependsOn       func(ast.Expr, map[types.Object]bool) bool
 	mutableVars     map[types.Object]bool
+	aliases         pointerAliases
 	receives        map[*ast.UnaryExpr]bool
 	clockGuards     map[ast.Node]bool
 	callResults     map[*ast.CallExpr]bool
@@ -67,7 +69,7 @@ type branchTarget[T any] struct {
 	parent    *branchTarget[T]
 }
 
-func deadlineReceives(pass *analysis.Pass) map[*ast.UnaryExpr]bool {
+func deadlineReceives(pass *analysis.Pass, aliases pointerAliases) map[*ast.UnaryExpr]bool {
 	callResults := make(map[*ast.CallExpr]bool)
 	mutableVars := make(map[types.Object]bool)
 	for _, file := range pass.Files {
@@ -80,6 +82,7 @@ func deadlineReceives(pass *analysis.Pass) map[*ast.UnaryExpr]bool {
 			return afterDeadline(pass.TypesInfo, expr, tracked, callResults)
 		},
 		mutableVars: mutableVars,
+		aliases:     aliases,
 		receives:    make(map[*ast.UnaryExpr]bool),
 		callResults: callResults,
 	}
@@ -178,7 +181,7 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 			for _, arg := range expr.Args {
 				scan.record(arg)
 			}
-			forgetCallWrites(scan.info, expr, parent, scan.tracked)
+			forgetCallWrites(scan.info, scan.aliases, expr, parent, scan.tracked)
 		} else {
 			scan.recordImmediateCall(expr, literal)
 		}
@@ -277,7 +280,7 @@ func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.Fu
 		return
 	}
 
-	forgetCallWrites(scan.info, call, nil, scan.tracked)
+	forgetCallWrites(scan.info, scan.aliases, call, nil, scan.tracked)
 	body := scan.fork()
 	signature := scan.info.TypeOf(literal).(*types.Signature)
 	params := signature.Params()
@@ -299,7 +302,7 @@ func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.Fu
 	body.recordLiteral(literal, &returns, result)
 	// Explicit returns and fallthrough both resume the caller.
 	resumed := mergePollingFlows(body.pollingFlow, returns)
-	writes := deferredWrites(scan.info, literal.Body)
+	writes := deferredWrites(scan.info, scan.aliases, literal.Body)
 	if result != nil {
 		scan.callResults[call] = returns.tracked[result] && !writes[result]
 		delete(resumed.tracked, result)
@@ -315,7 +318,7 @@ func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.Fu
 	for object := range writes {
 		delete(resumed.tracked, object)
 	}
-	forgetCallWrites(scan.info, call, nil, resumed.tracked)
+	forgetCallWrites(scan.info, scan.aliases, call, nil, resumed.tracked)
 	scan.tracked = resumed.tracked
 }
 
@@ -468,7 +471,7 @@ func (scan pollingScan) store(object types.Object, tracked bool) {
 	}
 }
 
-func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives map[*ast.UnaryExpr]bool) bool {
+func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives map[*ast.UnaryExpr]bool, aliases pointerAliases) bool {
 	var body *ast.BlockStmt
 	var condition ast.Expr
 	var post ast.Stmt
@@ -507,6 +510,7 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 		},
 		clockGuards:   make(map[ast.Node]bool),
 		callResults:   callResults,
+		aliases:       aliases,
 		continuations: &pollingContinuations{},
 	}
 	clockInHeader := false

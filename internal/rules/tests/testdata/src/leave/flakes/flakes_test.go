@@ -1461,6 +1461,24 @@ func TestSkipAfterHelperOverwritesFailure(t *testing.T) {
 
 func forceFlag(flag *bool) { *flag = true }
 
+func TestSkipAfterHelperOverwritesFlagThroughAlias(t *testing.T) {
+	failed := t.Failed()
+	p := &failed
+	forceFlag(p)
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipAfterDeferredHelperOverwritesFlagThroughAlias(t *testing.T) {
+	failed := t.Failed()
+	p := &failed
+	func() { defer forceFlag(p) }()
+	if failed {
+		t.Skip("optional")
+	}
+}
+
 func TestSkipAfterImmediateClosureOverwritesFailure(t *testing.T) {
 	failed := t.Failed()
 	func(flag *bool) {
