@@ -299,8 +299,9 @@ func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.Fu
 	body.recordLiteral(literal, &returns, result)
 	// Explicit returns and fallthrough both resume the caller.
 	resumed := mergePollingFlows(body.pollingFlow, returns)
+	writes := deferredWrites(scan.info, literal.Body)
 	if result != nil {
-		scan.callResults[call] = returns.tracked[result] && !deferredWrites(scan.info, literal.Body)[result]
+		scan.callResults[call] = returns.tracked[result] && !writes[result]
 		delete(resumed.tracked, result)
 	}
 	if resumed.tracked == nil {
@@ -310,6 +311,9 @@ func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.Fu
 	}
 	for i := range fixed {
 		delete(resumed.tracked, params.At(i))
+	}
+	for object := range writes {
+		delete(resumed.tracked, object)
 	}
 	forgetCallWrites(scan.info, call, nil, resumed.tracked)
 	scan.tracked = resumed.tracked

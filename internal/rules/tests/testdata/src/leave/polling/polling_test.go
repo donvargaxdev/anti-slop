@@ -931,3 +931,26 @@ func TestReceiveAfterDeferredHelperReplacesReturnedDeadline(t *testing.T) {
 		<-ch
 	}
 }
+
+func TestReceiveAfterDeferredClosureReplacesCapturedDeadline(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	func() { defer func() { ch = ready }() }()
+	for range 3 {
+		<-ch
+	}
+}
+
+func TestReceiveAfterDeferredHelperReplacesCapturedDeadline(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	func() {
+		defer replaceDeadline(&ch, ready)
+		return
+	}()
+	for range 3 {
+		<-ch
+	}
+}

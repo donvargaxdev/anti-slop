@@ -358,6 +358,16 @@ Feature: Test reliability
           }
       }
 
+      func TestReceiveAfterDeferredCaptureWrite(t *testing.T) {
+          ready := make(chan time.Time)
+          close(ready)
+          ch := time.After(time.Second)
+          func() { defer func() { ch = ready }() }()
+          for range 3 {
+              <-ch
+          }
+      }
+
       func check() error { return nil }
       """
     When anti-slop runs with "tests ./..."
