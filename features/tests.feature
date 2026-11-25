@@ -116,6 +116,17 @@ Feature: Test reliability
               t.Run(strconv.Itoa(i), func(t *testing.T) {})
           }
       }
+
+      func TestHandledFailure(t *testing.T) {
+          failed := t.Failed()
+          switch {
+          case failed:
+              return
+          }
+          if failed {
+              t.Skip("optional")
+          }
+      }
       """
     When anti-slop runs with "tests ./..."
     Then it exits with code 0

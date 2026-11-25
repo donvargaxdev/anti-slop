@@ -544,3 +544,38 @@ func TestSkipInNestedFunctionOfFailureCase(t *testing.T) {
 		})
 	}
 }
+
+func TestSwitchReturnsOnFailure(t *testing.T) {
+	failed := t.Failed()
+	switch {
+	case failed:
+		return
+	}
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestSwitchDefaultAfterNonmatchingFailure(t *testing.T) {
+	ok := t.Run("body", func(t *testing.T) {})
+	switch ok {
+	default:
+		if !ok {
+			t.Skip("optional")
+		}
+	case false:
+		return
+	}
+}
+
+func TestLaterCaseAfterNonmatchingFailure(t *testing.T) {
+	failed := t.Failed()
+	switch false {
+	case !failed:
+		return
+	case !testing.Short():
+		if failed {
+			t.Skip("optional")
+		}
+	}
+}

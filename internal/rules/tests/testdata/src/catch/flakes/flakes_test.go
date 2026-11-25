@@ -601,3 +601,36 @@ func TestSkipOnFailureAfterDeferredFatal(t *test.T) {
 		t.Skip("failed") // want "skipping after a failure"
 	}
 }
+
+func TestSwitchReturnsOnSuccess(t *test.T) {
+	failed := t.Failed()
+	switch failed {
+	case false:
+		return
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSwitchAlternativeKeepsFailureOutcome(t *test.T) {
+	failed := t.Failed()
+	switch {
+	case !failed, test.Short():
+		if failed {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+	}
+}
+
+func TestFallthroughCarriesFailureToLaterBody(t *test.T) {
+	failed := t.Failed()
+	switch {
+	case failed && test.Short():
+		fallthrough
+	case !failed:
+		if failed {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+	}
+}

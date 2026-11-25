@@ -131,7 +131,7 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 		case *ast.SwitchStmt:
 			c.walk(stmt.Init, visit)
 			c.walk(stmt.Tag, visit)
-			c.walkCases(stmt.Body, label, c.switchGuards(stmt), visit)
+			c.walkCases(stmt.Body, label, stmt.Tag, visit)
 			return false
 		case *ast.TypeSwitchStmt:
 			c.walk(stmt.Init, visit)
@@ -245,27 +245,35 @@ func (c *flakeChecks) walkCommunications(body *ast.BlockStmt, label types.Object
 	c.outcomes = mergeOutcomes(c.outcomes, entry.target.breaks)
 }
 
-func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, guards map[*ast.CaseClause]bool, visit func(flakeChecks, ast.Node, ast.Node) bool) {
+type switchPath struct {
+	outcomes map[types.Object]outcomePolarity
+	guarded  bool
+}
+
+func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, tag ast.Expr, visit func(flakeChecks, ast.Node, ast.Node) bool) {
 	entry := c.withTarget(label, false)
+	matches, unmatched := entry.matchSwitchCases(body, tag, visit)
+	// Default is selected after all expressions miss, but fallthrough follows body order.
 	c.outcomes = nil
 	var fallingThrough map[types.Object]outcomePolarity
 	fallthroughGuard := false
 	hasDefault := false
 	for _, stmt := range body.List {
 		clause := stmt.(*ast.CaseClause)
-		hasDefault = hasDefault || clause.List == nil
-		branch := entry.fork()
-		for _, expr := range clause.List {
-			branch.walk(expr, visit)
+		path := matches[clause]
+		if clause.List == nil {
+			hasDefault = true
+			path = unmatched
 		}
 		// Fallthrough enters the next body without evaluating the case expressions.
-		guarded := guards[clause] && (fallingThrough == nil || fallthroughGuard)
+		guarded := path.guarded && (fallingThrough == nil || fallthroughGuard)
+		branch := *entry
+		branch.outcomes = mergeOutcomes(path.outcomes, fallingThrough)
 		if c.retryBody == nil {
 			branch.failureGuard = entry.failureGuard || guarded
 		} else {
 			branch.successCase = entry.successCase || guarded
 		}
-		branch.outcomes = mergeOutcomes(branch.outcomes, fallingThrough)
 		for _, stmt := range clause.Body {
 			branch.walk(stmt, visit)
 		}
@@ -278,53 +286,68 @@ func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, guards 
 		}
 	}
 	if !hasDefault {
-		c.outcomes = mergeOutcomes(c.outcomes, entry.outcomes)
+		c.outcomes = mergeOutcomes(c.outcomes, unmatched.outcomes)
 	}
 	c.outcomes = mergeOutcomes(c.outcomes, entry.target.breaks)
 }
 
-func (c flakeChecks) switchGuards(stmt *ast.SwitchStmt) map[*ast.CaseClause]bool {
-	guards := make(map[*ast.CaseClause]bool)
-	failure := c.retryBody == nil
+func (c *flakeChecks) matchSwitchCases(body *ast.BlockStmt, tag ast.Expr, visit func(flakeChecks, ast.Node, ast.Node) bool) (map[*ast.CaseClause]switchPath, switchPath) {
+	matches := make(map[*ast.CaseClause]switchPath)
 	var attempt ast.Node
-	if !failure {
+	if c.retryBody != nil {
 		attempt = c.retryBody
 	}
-	var defaultClause *ast.CaseClause
 	unmatchedGuard := false
-	for _, node := range stmt.Body.List {
+	for _, node := range body.List {
 		clause := node.(*ast.CaseClause)
 		if clause.List == nil {
-			defaultClause = clause
 			continue
 		}
-		// Each expression can select this body. Later expressions are reached
-		// only after all earlier expressions in the switch have failed to match.
-		matchedGuard := true
+		// Later expressions are evaluated only after all earlier ones miss.
+		matched := switchPath{guarded: true}
 		for _, expr := range clause.List {
-			matchedGuard = matchedGuard && (unmatchedGuard || c.switchOutcome(stmt.Tag, expr, true, failure, attempt))
-			unmatchedGuard = unmatchedGuard || c.switchOutcome(stmt.Tag, expr, false, failure, attempt)
+			c.walk(expr, visit)
+			branch := c.fork()
+			matchGuard := branch.constrainSwitchCase(tag, expr, true, attempt)
+			matched.guarded = matched.guarded && (unmatchedGuard || matchGuard)
+			matched.outcomes = mergeOutcomes(matched.outcomes, branch.outcomes)
+
+			missGuard := c.constrainSwitchCase(tag, expr, false, attempt)
+			unmatchedGuard = unmatchedGuard || missGuard
 		}
-		guards[clause] = matchedGuard
+		matches[clause] = matched
 	}
-	if defaultClause != nil {
-		guards[defaultClause] = unmatchedGuard
-	}
-	return guards
+	return matches, switchPath{outcomes: c.outcomes, guarded: unmatchedGuard}
 }
 
-func (c flakeChecks) switchOutcome(tag, expr ast.Expr, matches, failure bool, attempt ast.Node) bool {
+func (c *flakeChecks) constrainSwitchCase(tag, expr ast.Expr, matches bool, attempt ast.Node) bool {
+	condition, trueOnMatch := c.switchCondition(tag, expr)
+	if condition == nil {
+		return attempt != nil && matches && errorComparedWithNil(c.info, tag, expr, attempt)
+	}
+	truth := matches == trueOnMatch
+	guarded := c.failureCondition(condition, truth == (attempt == nil), attempt)
+	possible := failsWhenFalse
+	if truth {
+		possible = failsWhenTrue
+	}
+	c.constrainOutcome(condition, possible)
+	return guarded
+}
+
+// switchCondition finds the boolean operand and its value when the case matches.
+func (c flakeChecks) switchCondition(tag, expr ast.Expr) (ast.Expr, bool) {
 	if tag == nil {
-		return c.failureCondition(expr, matches == failure, attempt)
+		return expr, true
 	}
 	if value := c.info.Types[tag].Value; value != nil && value.Kind() == constant.Bool {
-		return c.failureCondition(expr, (matches == constant.BoolVal(value)) == failure, attempt)
+		return expr, constant.BoolVal(value)
 	}
 	value := c.info.Types[expr].Value
 	if value != nil && value.Kind() == constant.Bool {
-		return c.failureCondition(tag, (matches == constant.BoolVal(value)) == failure, attempt)
+		return tag, constant.BoolVal(value)
 	}
-	return attempt != nil && matches != failure && errorComparedWithNil(c.info, tag, expr, attempt)
+	return nil, false
 }
 
 func mergeOutcomes(dst, src map[types.Object]outcomePolarity) map[types.Object]outcomePolarity {
