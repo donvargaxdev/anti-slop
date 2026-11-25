@@ -1277,3 +1277,13 @@ func TestDeferredSkipOnCapturedFailureWithShadow(t *test.T) {
 		t.Log("short")
 	}
 }
+
+func TestSkipOnNamedResultReadByDefer(t *test.T) {
+	if func() (failed bool) {
+		defer func() { t.Log(failed) }()
+		failed = t.Failed()
+		return
+	}() {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}

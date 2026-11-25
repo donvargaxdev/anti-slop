@@ -1447,3 +1447,44 @@ func TestSkipAfterHelperOverwritesFailure(t *testing.T) {
 }
 
 func forceFlag(flag *bool) { *flag = true }
+
+func TestSkipAfterImmediateClosureOverwritesFailure(t *testing.T) {
+	failed := t.Failed()
+	func(flag *bool) {
+		*flag = true
+		if failed {
+			t.Skip("optional")
+		}
+	}(&failed)
+}
+
+func TestSkipAfterImmediateClosureWritesThroughCaptureAndPointer(t *testing.T) {
+	var failed bool
+	func(flag *bool) {
+		failed = t.Failed()
+		*flag = true
+	}(&failed)
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipAfterDeferredClosureClearsNamedResult(t *testing.T) {
+	if func() (failed bool) {
+		defer func() { failed = false }()
+		failed = t.Failed()
+		return
+	}() {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipAfterDeferredHelperOverwritesNamedResult(t *testing.T) {
+	if func() (failed bool) {
+		defer forceFlag(&failed)
+		failed = t.Failed()
+		return
+	}() {
+		t.Skip("optional")
+	}
+}

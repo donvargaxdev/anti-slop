@@ -325,6 +325,31 @@ Feature: Test reliability
           }
       }
 
+      func TestImmediatePointerWrites(t *testing.T) {
+          failed := t.Failed()
+          func(flag *bool) { *flag = true }(&failed)
+          if failed {
+              t.Skip("optional")
+          }
+          ready := make(chan time.Time)
+          close(ready)
+          ch := time.After(time.Second)
+          func(ch *<-chan time.Time) { *ch = ready }(&ch)
+          for range 3 {
+              <-ch
+          }
+      }
+
+      func TestDeferredResultWrite(t *testing.T) {
+          if func() (failed bool) {
+              defer func() { failed = false }()
+              failed = t.Failed()
+              return
+          }() {
+              t.Skip("optional")
+          }
+      }
+
       func check() error { return nil }
       """
     When anti-slop runs with "tests ./..."

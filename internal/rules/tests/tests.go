@@ -93,12 +93,41 @@ func forgetCallWrites[V any](info *types.Info, call *ast.CallExpr, parent ast.No
 		return
 	}
 	for _, arg := range call.Args {
-		if address, ok := ast.Unparen(arg).(*ast.UnaryExpr); ok && address.Op == token.AND {
-			if name, ok := ast.Unparen(address.X).(*ast.Ident); ok {
-				delete(tracked, info.Uses[name])
-			}
+		if object := addressedVariable(info, arg); object != nil {
+			delete(tracked, object)
 		}
 	}
+}
+
+func addressedVariable(info *types.Info, expr ast.Expr) types.Object {
+	if address, ok := ast.Unparen(expr).(*ast.UnaryExpr); ok && address.Op == token.AND {
+		if name, ok := ast.Unparen(address.X).(*ast.Ident); ok {
+			return info.Uses[name]
+		}
+	}
+	return nil
+}
+
+// A defer can change a named result after the return operands are evaluated.
+func deferMayWriteResult(info *types.Info, body *ast.BlockStmt, result *types.Var) bool {
+	if result.Name() == "" {
+		return false
+	}
+	return contains(body, func(node ast.Node) bool {
+		stmt, ok := node.(*ast.DeferStmt)
+		if !ok {
+			return false
+		}
+		if literal, ok := ast.Unparen(stmt.Call.Fun).(*ast.FuncLit); ok && mutableVariables(info, literal.Body)[result] {
+			return true
+		}
+		for _, arg := range stmt.Call.Args {
+			if addressedVariable(info, arg) == result {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 func invokesLiteral(literal *ast.FuncLit, parents []ast.Node) bool {

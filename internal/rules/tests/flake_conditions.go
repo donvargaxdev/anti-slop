@@ -301,7 +301,7 @@ func booleanResult(info *types.Info, expr ast.Expr) bool {
 }
 
 // mutableVariables finds variables that can be written after initialization.
-func mutableVariables(info *types.Info, file *ast.File) map[types.Object]bool {
+func mutableVariables(info *types.Info, root ast.Node) map[types.Object]bool {
 	mutable := make(map[types.Object]bool)
 	mark := func(targets ...ast.Expr) {
 		for _, target := range targets {
@@ -312,7 +312,7 @@ func mutableVariables(info *types.Info, file *ast.File) map[types.Object]bool {
 			}
 		}
 	}
-	for node := range ast.Preorder(file) {
+	for node := range ast.Preorder(root) {
 		switch stmt := node.(type) {
 		case *ast.AssignStmt:
 			mark(stmt.Lhs...)

@@ -277,6 +277,7 @@ func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.Fu
 		return
 	}
 
+	forgetCallWrites(scan.info, call, nil, scan.tracked)
 	body := scan.fork()
 	signature := scan.info.TypeOf(literal).(*types.Signature)
 	params := signature.Params()
@@ -299,7 +300,7 @@ func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.Fu
 	// Explicit returns and fallthrough both resume the caller.
 	resumed := mergePollingFlows(body.pollingFlow, returns)
 	if result != nil {
-		scan.callResults[call] = returns.tracked[result]
+		scan.callResults[call] = returns.tracked[result] && !deferMayWriteResult(scan.info, literal.Body, result)
 		delete(resumed.tracked, result)
 	}
 	if resumed.tracked == nil {
@@ -310,6 +311,7 @@ func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.Fu
 	for i := range fixed {
 		delete(resumed.tracked, params.At(i))
 	}
+	forgetCallWrites(scan.info, call, nil, resumed.tracked)
 	scan.tracked = resumed.tracked
 }
 

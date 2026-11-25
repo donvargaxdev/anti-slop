@@ -882,3 +882,52 @@ func TestReceiveAfterHelperReplacesDeadline(t *testing.T) {
 }
 
 func replaceDeadline(ch *<-chan time.Time, ready <-chan time.Time) { *ch = ready }
+
+func TestReceiveAfterImmediateClosureReplacesDeadline(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	func(deadline *<-chan time.Time) {
+		*deadline = ready
+		for range 3 {
+			<-ch
+		}
+	}(&ch)
+}
+
+func TestReceiveAfterImmediateClosureWritesThroughCaptureAndPointer(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	var ch <-chan time.Time
+	func(deadline *<-chan time.Time) {
+		ch = time.After(time.Second)
+		*deadline = ready
+	}(&ch)
+	for range 3 {
+		<-ch
+	}
+}
+
+func TestReceiveAfterDeferredClosureReplacesReturnedDeadline(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := func() (deadline <-chan time.Time) {
+		defer func() { deadline = ready }()
+		return time.After(time.Second)
+	}()
+	for range 3 {
+		<-ch
+	}
+}
+
+func TestReceiveAfterDeferredHelperReplacesReturnedDeadline(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := func() (deadline <-chan time.Time) {
+		defer replaceDeadline(&deadline, ready)
+		return time.After(time.Second)
+	}()
+	for range 3 {
+		<-ch
+	}
+}

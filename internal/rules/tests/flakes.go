@@ -262,6 +262,7 @@ func (c *flakeChecks) walkCall(call *ast.CallExpr, parent ast.Node, visit func(f
 
 func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit, visit func(flakeChecks, ast.Node, ast.Node) bool) {
 	outcomes := c.assignmentOutcomes(call.Args, len(call.Args), visit)
+	forgetCallWrites(c.info, call, nil, c.outcomes)
 	if !visit(*c, literal, call) {
 		return
 	}
@@ -294,7 +295,11 @@ func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit
 	}
 	body.walk(literal.Body, visit)
 	if returns.result != nil {
-		c.callOutcomes[call] = returns.booleanOutcome()
+		if deferMayWriteResult(c.info, literal.Body, returns.result) {
+			delete(c.callOutcomes, call)
+		} else {
+			c.callOutcomes[call] = returns.booleanOutcome()
+		}
 	}
 	// Explicit returns and fallthrough both resume the caller. A testing
 	// termination inside the literal may belong to a different test.
@@ -305,6 +310,7 @@ func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit
 		for result := range results.Variables() {
 			delete(outcomes, result)
 		}
+		forgetCallWrites(c.info, call, nil, outcomes)
 		c.outcomes = outcomes
 	}
 }
