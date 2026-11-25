@@ -295,3 +295,61 @@ func TestContinueEvenOnSuccess(t *testing.T) {
 		continue
 	}
 }
+
+func TestRangeOverwritesStoredOutcome(t *testing.T) {
+	failed := t.Failed()
+	for _, failed = range [1]bool{false} {
+		if failed {
+			t.Skip("optional test")
+		}
+	}
+	if failed {
+		t.Skip("optional test")
+	}
+
+	failed = t.Failed()
+	for failed = range map[bool]struct{}{false: {}} {
+		if failed {
+			t.Skip("optional test")
+		}
+	}
+}
+
+func TestCleanupReturnDoesNotExitLoop(t *testing.T) {
+	for range 3 {
+		t.Cleanup(func() {
+			if check() == nil {
+				return
+			}
+		})
+	}
+}
+
+func TestContinueStillRunsPost(t *testing.T) {
+	failed := false
+	for first := true; first; failed = false {
+		first = false
+		failed = t.Failed()
+		select {
+		default:
+			continue
+		}
+	}
+	if failed {
+		t.Skip("optional test")
+	}
+}
+
+func TestSwitchBreakDoesNotExitLoop(t *testing.T) {
+	failed := t.Failed()
+	for range 1 {
+		switch {
+		default:
+			break
+		}
+		failed = false
+	}
+	if failed {
+		t.Skip("optional test")
+	}
+}

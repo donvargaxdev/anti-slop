@@ -36,15 +36,15 @@ type pollingScan struct {
 	dependsOn   func(ast.Expr, map[types.Object]bool) bool
 	receives    map[*ast.UnaryExpr]bool
 	clockGuards map[*ast.IfStmt]bool
-	target      *branchTarget
+	target      *branchTarget[bool]
 }
 
-type branchTarget struct {
+type branchTarget[T any] struct {
 	label     types.Object
 	isLoop    bool
-	breaks    map[types.Object]bool
-	continues map[types.Object]bool
-	parent    *branchTarget
+	breaks    map[types.Object]T
+	continues map[types.Object]T
+	parent    *branchTarget[T]
 }
 
 func deadlineReceives(pass *analysis.Pass) map[*ast.UnaryExpr]bool {
@@ -80,7 +80,7 @@ func (scan pollingScan) fork() *pollingScan {
 
 func (scan pollingScan) withTarget(label types.Object, isLoop bool) *pollingScan {
 	branch := scan.fork()
-	branch.target = &branchTarget{label: label, isLoop: isLoop, parent: scan.target}
+	branch.target = &branchTarget[bool]{label: label, isLoop: isLoop, parent: scan.target}
 	return branch
 }
 
@@ -172,21 +172,28 @@ func (scan *pollingScan) visit(node ast.Node) bool {
 }
 
 func (scan *pollingScan) recordBranch(stmt *ast.BranchStmt) {
-	label := scan.info.Uses[stmt.Label]
-	continuing := stmt.Tok == token.CONTINUE
-	for target := scan.target; target != nil; target = target.parent {
-		matchesLabel := stmt.Label == nil || label != nil && target.label == label
-		if !matchesLabel || continuing && !target.isLoop {
-			continue
-		}
-		if continuing {
-			target.continues = mergeTracked(target.continues, scan.tracked)
-		} else {
-			target.breaks = mergeTracked(target.breaks, scan.tracked)
-		}
-		scan.tracked = nil
+	target := scan.target.destination(scan.info, stmt)
+	if target == nil {
 		return
 	}
+	if stmt.Tok == token.CONTINUE {
+		target.continues = mergeTracked(target.continues, scan.tracked)
+	} else {
+		target.breaks = mergeTracked(target.breaks, scan.tracked)
+	}
+	scan.tracked = nil
+}
+
+func (target *branchTarget[T]) destination(info *types.Info, stmt *ast.BranchStmt) *branchTarget[T] {
+	label := info.Uses[stmt.Label]
+	continuing := stmt.Tok == token.CONTINUE
+	for ; target != nil; target = target.parent {
+		matchesLabel := stmt.Label == nil || label != nil && target.label == label
+		if matchesLabel && (!continuing || target.isLoop) {
+			return target
+		}
+	}
+	return nil
 }
 
 func (scan *pollingScan) recordSelect(body *ast.BlockStmt, label types.Object) {
@@ -325,7 +332,7 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 		return true
 	}
 
-	target := &branchTarget{isLoop: true}
+	target := &branchTarget[bool]{isLoop: true}
 	if labeled, ok := parents[len(parents)-1].(*ast.LabeledStmt); ok {
 		target.label = info.Defs[labeled.Label]
 	}

@@ -353,3 +353,58 @@ func retryUntilLabeledReturn() {
 		return
 	}
 }
+
+func TestSkipAfterEarlyBreak(t *test.T) {
+	failed := t.Failed()
+	for range 1 {
+		if test.Short() {
+			break
+		}
+		failed = false
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipAfterEarlyContinue(t *test.T) {
+	failed := t.Failed()
+	for range 1 {
+		if test.Short() {
+			continue
+		}
+		failed = false
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func skipAfterLabeledBreak(t *test.T, retry bool) {
+	failed := false
+attempts:
+	for ; retry; failed = false {
+		switch {
+		case test.Short():
+			failed = t.Failed()
+			break attempts
+		default:
+			failed = false
+		}
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func skipAfterEmptyRange(t *test.T, values []bool) {
+	failed := t.Failed()
+	for _, failed = range values {
+		if failed {
+			t.Skip("optional test")
+		}
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}

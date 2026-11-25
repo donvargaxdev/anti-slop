@@ -17,8 +17,10 @@ var Flakes = &analysis.Analyzer{
 }
 
 type flakeChecks struct {
-	info     *types.Info
+	info *types.Info
+	// A nil map marks a path that jumped away.
 	outcomes map[types.Object]outcomePolarity
+	target   *branchTarget[outcomePolarity]
 }
 
 type outcomePolarity uint8
@@ -73,57 +75,78 @@ func (c flakeChecks) reportFinding(pass *analysis.Pass, node ast.Node, skips map
 }
 
 // walk tracks stored outcomes in source order and joins alternative branches.
-func (c flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.Node) bool) {
+func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.Node) bool) {
 	if root == nil {
 		return
 	}
 	ast.PreorderStack(root, nil, func(node ast.Node, parents []ast.Node) bool {
+		if c.outcomes == nil {
+			return false
+		}
 		var parent ast.Node
 		if len(parents) > 0 {
 			parent = parents[len(parents)-1]
 		}
 		if stmt, ok := node.(*ast.IfStmt); ok {
 			c.walk(stmt.Init, visit)
-			if visit(c, stmt, parent) {
+			if visit(*c, stmt, parent) {
 				c.walk(stmt.Cond, visit)
-				then := c
-				then.outcomes = maps.Clone(c.outcomes)
+				then := c.fork()
 				then.walk(stmt.Body, visit)
 				c.walk(stmt.Else, visit)
-				mergeOutcomes(c.outcomes, then.outcomes)
+				c.outcomes = mergeOutcomes(c.outcomes, then.outcomes)
 			}
 			return false
 		}
-		if !visit(c, node, parent) {
+		if !visit(*c, node, parent) {
 			return false
+		}
+		var label types.Object
+		if labeled, ok := parent.(*ast.LabeledStmt); ok {
+			label = c.info.Defs[labeled.Label]
 		}
 		switch stmt := node.(type) {
 		case *ast.ForStmt:
 			c.walk(stmt.Init, visit)
 			c.walk(stmt.Cond, visit)
-			c.walkLoop(stmt.Body, stmt.Post, forMaySkip(c.info, stmt.Cond), visit)
+			iteration := c.withTarget(label, true)
+			c.walkLoop(iteration, stmt.Body, stmt.Post, forMaySkip(c.info, stmt.Cond), visit)
 			return false
 		case *ast.RangeStmt:
 			c.walk(stmt.X, visit)
-			c.walkLoop(stmt.Body, nil, rangeMayBeEmpty(c.info, stmt.X), visit)
+			iteration := c.withTarget(label, true)
+			for _, target := range [...]ast.Expr{stmt.Key, stmt.Value} {
+				c.walk(target, visit)
+				if name, ok := ast.Unparen(target).(*ast.Ident); ok {
+					iteration.storeOutcome(name, 0)
+				}
+			}
+			c.walkLoop(iteration, stmt.Body, nil, rangeMayBeEmpty(c.info, stmt.X), visit)
 			return false
 		case *ast.SwitchStmt:
 			c.walk(stmt.Init, visit)
 			c.walk(stmt.Tag, visit)
-			c.walkCases(stmt.Body, visit)
+			c.walkCases(stmt.Body, label, visit)
 			return false
 		case *ast.TypeSwitchStmt:
 			c.walk(stmt.Init, visit)
 			c.walk(stmt.Assign, visit)
-			c.walkCases(stmt.Body, visit)
+			c.walkCases(stmt.Body, label, visit)
 			return false
 		case *ast.SelectStmt:
-			c.walkCommunications(stmt.Body, visit)
+			c.walkCommunications(stmt.Body, label, visit)
+			return false
+		case *ast.BranchStmt:
+			if stmt.Tok == token.BREAK || stmt.Tok == token.CONTINUE {
+				c.recordBranch(stmt)
+			}
+		case *ast.FuncDecl:
+			if stmt.Body != nil {
+				c.fork().walk(stmt.Body, visit)
+			}
 			return false
 		case *ast.FuncLit:
-			body := c
-			body.outcomes = maps.Clone(c.outcomes)
-			body.walk(stmt.Body, visit)
+			c.fork().walk(stmt.Body, visit)
 			return false
 		case *ast.AssignStmt:
 			outcomes := c.assignmentOutcomes(stmt.Rhs, len(stmt.Lhs))
@@ -142,45 +165,67 @@ func (c flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.N
 	})
 }
 
-func (c flakeChecks) walkLoop(body *ast.BlockStmt, post ast.Stmt, maySkip bool, visit func(flakeChecks, ast.Node, ast.Node) bool) {
-	iteration := c
-	if maySkip {
-		iteration.outcomes = maps.Clone(c.outcomes)
+func (c flakeChecks) fork() *flakeChecks {
+	c.outcomes = maps.Clone(c.outcomes)
+	return &c
+}
+
+func (c flakeChecks) withTarget(label types.Object, isLoop bool) *flakeChecks {
+	branch := c.fork()
+	branch.target = &branchTarget[outcomePolarity]{label: label, isLoop: isLoop, parent: c.target}
+	return branch
+}
+
+func (c *flakeChecks) recordBranch(stmt *ast.BranchStmt) {
+	target := c.target.destination(c.info, stmt)
+	if target == nil {
+		return
 	}
+	if stmt.Tok == token.CONTINUE {
+		target.continues = mergeOutcomes(target.continues, c.outcomes)
+	} else {
+		target.breaks = mergeOutcomes(target.breaks, c.outcomes)
+	}
+	c.outcomes = nil
+}
+
+func (c *flakeChecks) walkLoop(iteration *flakeChecks, body *ast.BlockStmt, post ast.Stmt, maySkip bool, visit func(flakeChecks, ast.Node, ast.Node) bool) {
 	iteration.walk(body, visit)
+	// Continue runs the post statement. Break reaches the next statement directly.
+	iteration.outcomes = mergeOutcomes(iteration.outcomes, iteration.target.continues)
 	iteration.walk(post, visit)
+	exits := mergeOutcomes(iteration.outcomes, iteration.target.breaks)
 	if maySkip {
-		mergeOutcomes(c.outcomes, iteration.outcomes)
+		exits = mergeOutcomes(exits, c.outcomes)
 	}
+	c.outcomes = exits
 }
 
-func (c flakeChecks) walkCommunications(body *ast.BlockStmt, visit func(flakeChecks, ast.Node, ast.Node) bool) {
-	merged := make(map[types.Object]outcomePolarity)
+func (c *flakeChecks) walkCommunications(body *ast.BlockStmt, label types.Object, visit func(flakeChecks, ast.Node, ast.Node) bool) {
+	entry := c.withTarget(label, false)
+	c.outcomes = nil
 	for _, clause := range body.List {
-		branch := c
-		branch.outcomes = maps.Clone(c.outcomes)
+		branch := entry.fork()
 		branch.walk(clause, visit)
-		mergeOutcomes(merged, branch.outcomes)
+		c.outcomes = mergeOutcomes(c.outcomes, branch.outcomes)
 	}
-	// Only a selected clause can reach the statement after the select.
-	clear(c.outcomes)
-	mergeOutcomes(c.outcomes, merged)
+	c.outcomes = mergeOutcomes(c.outcomes, entry.target.breaks)
 }
 
-func (c flakeChecks) walkCases(body *ast.BlockStmt, visit func(flakeChecks, ast.Node, ast.Node) bool) {
-	merged := make(map[types.Object]outcomePolarity)
+func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, visit func(flakeChecks, ast.Node, ast.Node) bool) {
+	entry := c.withTarget(label, false)
+	c.outcomes = nil
 	var fallingThrough map[types.Object]outcomePolarity
 	hasDefault := false
 	for _, stmt := range body.List {
 		clause := stmt.(*ast.CaseClause)
 		hasDefault = hasDefault || clause.List == nil
-		branch := c
-		branch.outcomes = maps.Clone(c.outcomes)
+		branch := entry.fork()
 		for _, expr := range clause.List {
 			branch.walk(expr, visit)
 		}
 		// Fallthrough enters the next body without evaluating the case expressions.
-		mergeOutcomes(branch.outcomes, fallingThrough)
+		branch.outcomes = mergeOutcomes(branch.outcomes, fallingThrough)
 		for _, stmt := range clause.Body {
 			branch.walk(stmt, visit)
 		}
@@ -188,19 +233,23 @@ func (c flakeChecks) walkCases(body *ast.BlockStmt, visit func(flakeChecks, ast.
 			fallingThrough = branch.outcomes
 		} else {
 			fallingThrough = nil
-			mergeOutcomes(merged, branch.outcomes)
+			c.outcomes = mergeOutcomes(c.outcomes, branch.outcomes)
 		}
 	}
-	if hasDefault {
-		clear(c.outcomes)
+	if !hasDefault {
+		c.outcomes = mergeOutcomes(c.outcomes, entry.outcomes)
 	}
-	mergeOutcomes(c.outcomes, merged)
+	c.outcomes = mergeOutcomes(c.outcomes, entry.target.breaks)
 }
 
-func mergeOutcomes(dst, src map[types.Object]outcomePolarity) {
+func mergeOutcomes(dst, src map[types.Object]outcomePolarity) map[types.Object]outcomePolarity {
+	if dst == nil {
+		return maps.Clone(src)
+	}
 	for object, polarity := range src {
 		dst[object] |= polarity
 	}
+	return dst
 }
 
 // assignmentOutcomes reads the incoming state before any target is updated.
@@ -238,6 +287,7 @@ func (c flakeChecks) storeOutcome(name *ast.Ident, polarity outcomePolarity) {
 func (c flakeChecks) retriesLoop(body *ast.BlockStmt) bool {
 	// The main traversal still needs the state from before entering the loop.
 	c.outcomes = maps.Clone(c.outcomes)
+	c.target = nil
 	found := false
 	c.walk(body, func(c flakeChecks, node, parent ast.Node) bool {
 		if found {
