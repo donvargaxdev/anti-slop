@@ -23,6 +23,7 @@ type flakeChecks struct {
 	target      *branchTarget[flakeFlow]
 	retryBody   *ast.BlockStmt
 	successCase bool
+	retryHeader bool
 }
 
 type flakeFlow struct {
@@ -37,6 +38,7 @@ const (
 	failsWhenTrue outcomePolarity = 1 << iota
 	failsWhenFalse
 	shortMode
+	refreshedError
 )
 
 func runFlakes(pass *analysis.Pass) (any, error) {
@@ -50,18 +52,18 @@ func runFlakes(pass *analysis.Pass) (any, error) {
 		}
 	}
 	visitTestFiles(pass, func(file *ast.File) {
-		checks.walk(file, func(checks flakeChecks, node, _ ast.Node) bool {
-			checks.reportFinding(node, reportOnce)
+		checks.walk(file, func(checks flakeChecks, node, parent ast.Node) bool {
+			checks.reportFinding(node, parent, reportOnce)
 			return true
 		})
 	})
 	return nil, nil
 }
 
-func (c flakeChecks) reportFinding(node ast.Node, reportOnce func(ast.Node, string)) {
+func (c flakeChecks) reportFinding(node, parent ast.Node, reportOnce func(ast.Node, string)) {
 	switch stmt := node.(type) {
 	case *ast.ForStmt:
-		if forBounds(c.info, stmt.Cond).maxIterations != 0 && (c.retriesInHeader(stmt) || c.retriesLoop(stmt.Body)) {
+		if forBounds(c.info, stmt.Cond).maxIterations != 0 && (c.retriesInHeader(stmt, parent) || c.retriesLoop(stmt.Body)) {
 			reportOnce(stmt, "retrying a check or test body")
 		}
 	case *ast.RangeStmt:
@@ -332,7 +334,7 @@ func (c *flakeChecks) constrainSwitchCase(tag, expr ast.Expr, matches bool, atte
 	condition, trueOnMatch := c.switchCondition(tag, expr)
 	if condition == nil {
 		// Matching nil proves success. Missing nil proves failure.
-		return matches == (attempt != nil) && errorComparedWithNil(c.info, tag, expr, attempt)
+		return matches == (attempt != nil) && c.errorComparedWithNil(tag, expr, attempt)
 	}
 	truth := matches == trueOnMatch
 	guarded := c.failureCondition(condition, truth == (attempt == nil), attempt)
@@ -390,10 +392,16 @@ func mergeOutcomes(dst, src map[types.Object]outcomePolarity) map[types.Object]o
 func (c flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int) []outcomePolarity {
 	outcomes := make([]outcomePolarity, targetCount)
 	if len(values) != targetCount {
+		if c.retryHeader {
+			c.retryTupleOutcomes(values, outcomes)
+		}
 		return outcomes
 	}
 	for i, value := range values {
 		if !booleanResult(c.info, value) {
+			if c.retryHeader {
+				outcomes[i] = c.retryErrorOutcome(value)
+			}
 			continue
 		}
 		if c.isShortMode(value) {
@@ -405,6 +413,9 @@ func (c flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int) []ou
 		}
 		if c.failureCondition(value, false, nil) {
 			outcomes[i] |= failsWhenFalse
+		}
+		if c.retryHeader && outcomes[i] == 0 && c.isCheckCall(value) {
+			outcomes[i] = failsWhenFalse
 		}
 	}
 	return outcomes
@@ -489,16 +500,6 @@ func (c flakeChecks) retriesLoop(body *ast.BlockStmt) bool {
 	return found
 }
 
-func (c flakeChecks) retriesInHeader(loop *ast.ForStmt) bool {
-	if loop.Cond == nil {
-		return false
-	}
-	if post, ok := loop.Post.(*ast.AssignStmt); ok {
-		return c.failureCondition(loop.Cond, true, post)
-	}
-	return false
-}
-
 func (c flakeChecks) outcomeBranches(stmt *ast.IfStmt, failure bool, attempt ast.Node) [2]ast.Stmt {
 	var branches [2]ast.Stmt
 	if c.failureCondition(stmt.Cond, failure, attempt) {
@@ -508,121 +509,6 @@ func (c flakeChecks) outcomeBranches(stmt *ast.IfStmt, failure bool, attempt ast
 		branches[1] = stmt.Else
 	}
 	return branches
-}
-
-// failureCondition recognizes a check whose success or failure determines this
-// branch. In a retry loop a result must come from inside the loop.
-func (c flakeChecks) failureCondition(condition ast.Expr, failure bool, attempt ast.Node) bool {
-	switch expr := ast.Unparen(condition).(type) {
-	case *ast.UnaryExpr:
-		return expr.Op == token.NOT && c.failureCondition(expr.X, !failure, attempt)
-	case *ast.BinaryExpr:
-		return c.failureComparison(expr, failure, attempt)
-	case *ast.CallExpr:
-		switch {
-		case testingMethod(c.info, expr, "Failed"), packageCall(c.info, expr, "errors", "Is", "As"):
-			return failure
-		case testingMethod(c.info, expr, "Run"):
-			return !failure
-		case attempt != nil:
-			return !failure && booleanResult(c.info, expr) && !c.isShortMode(expr)
-		}
-	case *ast.Ident:
-		polarity := c.outcomes[c.info.ObjectOf(expr)]
-		if polarity == shortMode {
-			return false
-		}
-		if polarity != 0 && attemptResult(c.info, expr, attempt) {
-			if failure {
-				return polarity&failsWhenTrue != 0
-			}
-			return polarity&failsWhenFalse != 0
-		}
-		return !failure && attempt != nil && attemptResult(c.info, expr, attempt) && booleanResult(c.info, expr)
-	}
-	return false
-}
-
-func (c flakeChecks) failureComparison(expr *ast.BinaryExpr, failure bool, attempt ast.Node) bool {
-	switch expr.Op {
-	case token.LAND, token.LOR:
-		either := (expr.Op == token.LAND) == failure
-		left := c.failureCondition(expr.X, failure, attempt)
-		right := c.failureCondition(expr.Y, failure, attempt)
-		if either {
-			return left || right
-		}
-		return left && right
-	case token.EQL, token.NEQ:
-		if operand, same := booleanComparison(c.info, expr); operand != nil {
-			return c.failureCondition(operand, failure == same, attempt)
-		}
-		if (expr.Op == token.NEQ) != failure {
-			return false
-		}
-		return errorComparedWithNil(c.info, expr.X, expr.Y, attempt) ||
-			errorComparedWithNil(c.info, expr.Y, expr.X, attempt)
-	}
-	return false
-}
-
-// booleanComparison returns the operand tested against a boolean constant and
-// whether the comparison has the same truth value as that operand.
-func booleanComparison(info *types.Info, expr *ast.BinaryExpr) (ast.Expr, bool) {
-	if expr.Op != token.EQL && expr.Op != token.NEQ {
-		return nil, false
-	}
-	operand := expr.X
-	value := info.Types[expr.Y].Value
-	if value == nil {
-		operand = expr.Y
-		value = info.Types[expr.X].Value
-	}
-	if value == nil || value.Kind() != constant.Bool {
-		return nil, false
-	}
-	return operand, constant.BoolVal(value) == (expr.Op == token.EQL)
-}
-
-func errorComparedWithNil(info *types.Info, value, other ast.Expr, attempt ast.Node) bool {
-	nilIdent, ok := ast.Unparen(other).(*ast.Ident)
-	if !ok || info.Uses[nilIdent] != types.Universe.Lookup("nil") {
-		return false
-	}
-	typ := info.TypeOf(value)
-	errorType := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
-	return typ != nil && types.Implements(typ, errorType) && attemptResult(info, value, attempt)
-}
-
-func attemptResult(info *types.Info, value ast.Expr, attempt ast.Node) bool {
-	if attempt == nil {
-		return true
-	}
-	switch expr := ast.Unparen(value).(type) {
-	case *ast.CallExpr:
-		return true
-	case *ast.Ident:
-		object := info.ObjectOf(expr)
-		return object != nil && (attempt.Pos() < object.Pos() && object.Pos() < attempt.End() ||
-			contains(attempt, func(node ast.Node) bool {
-				assign, ok := node.(*ast.AssignStmt)
-				if !ok {
-					return false
-				}
-				for _, lhs := range assign.Lhs {
-					if ident, ok := lhs.(*ast.Ident); ok && info.ObjectOf(ident) == object {
-						return true
-					}
-				}
-				return false
-			}))
-	}
-	return false
-}
-
-func booleanResult(info *types.Info, expr ast.Expr) bool {
-	typ := info.TypeOf(expr)
-	return typ != nil && types.Identical(typ.Underlying(), types.Typ[types.Bool])
 }
 
 func lastStatement(branch ast.Stmt) ast.Stmt {

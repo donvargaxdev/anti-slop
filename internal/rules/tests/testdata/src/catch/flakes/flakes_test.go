@@ -152,6 +152,44 @@ func TestRetryHeader(t *test.T) {
 	}
 }
 
+func TestRetryWithBodyAssignment(t *test.T) {
+	err := check()
+	for attempts := 0; attempts < 3 && err != nil; attempts++ { // want "retrying a check or test body"
+		err = check()
+	}
+}
+
+func TestRetryWithBodyAssignmentBeforeContinue(t *test.T) {
+	passed := probe()
+retry:
+	for attempts := 0; attempts < 3 && !passed; attempts++ { // want "retrying a check or test body"
+		passed = probe()
+		continue retry
+	}
+}
+
+func TestRetryWithCopiedTupleResult(t *test.T) {
+	multiCheck := func() (int, error) { return 0, check() }
+	_, err := multiCheck()
+	for err != nil { // want "retrying a check or test body"
+		_, updated := multiCheck()
+		err = updated
+	}
+}
+
+func TestRetryWithClassifiedError(t *test.T) {
+	err := check()
+	for errors.Is(err, errors.ErrUnsupported) { // want "retrying a check or test body"
+		err = check()
+	}
+}
+
+func TestRetryWithDirectCheckAndPostAssignment(t *test.T) {
+	for i := 0; check() != nil; i = i + 1 { // want "retrying a check or test body"
+		t.Log(i)
+	}
+}
+
 func TestRetryAssignedCheck(t *test.T) {
 	var err error
 	for range 3 { // want "retrying a check or test body"

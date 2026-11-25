@@ -125,6 +125,30 @@ func validate(i int) error {
 
 func check() error { return nil }
 
+func TestLoopConditionUsesFixedFailure(t *testing.T) {
+	err := check()
+	for attempts := 0; attempts < 3 && err != nil; attempts++ {
+		t.Log(check())
+	}
+}
+
+func TestLoopConditionDoesNotReceiveAnotherCheck(t *testing.T) {
+	err := check()
+	for ; err != nil; err = nil {
+		err = check()
+		t.Log(err)
+	}
+}
+
+func TestLoopConditionIsNeverReachedWithUpdatedResult(t *testing.T) {
+	err := check()
+	for attempts := 0; attempts < 3 && err != nil; attempts++ {
+		err = check()
+		t.Log(err)
+		break
+	}
+}
+
 func TestFailure(t *testing.T) {
 	if err := check(); err != nil {
 		t.Fatal(err)

@@ -101,6 +101,15 @@ Feature: Test reliability
           }
           t.Skip("failed")
       }
+
+      func TestRetryInLoopBody(t *testing.T) {
+          err := check()
+          for attempts := 0; attempts < 3 && err != nil; attempts++ {
+              err = check()
+          }
+      }
+
+      func check() error { return nil }
       """
     When anti-slop runs with "tests ./..."
     Then it exits with code 0
@@ -117,6 +126,7 @@ Feature: Test reliability
       p_test.go:63:5: tests: polling against the wall clock
       p_test.go:71:5: tests: skipping after a failure
       p_test.go:79:5: tests: skipping after a failure
+      p_test.go:84:5: tests: retrying a check or test body
       """
     And its error output is empty
 
