@@ -46,6 +46,44 @@ func retryUntilSwitchHasNoError() {
 	}
 }
 
+func TestSkipOnNonNilSwitchError(t *test.T) {
+	switch err := check(); err {
+	case nil:
+	default:
+		t.Skip("failed") // want "skipping after a failure"
+	}
+
+	switch err := check(); err {
+	case nil:
+	case errors.New("another failure"):
+		t.SkipNow() // want "skipping after a failure"
+	}
+}
+
+func TestRetryAfterReplacingShortMode(t *test.T) {
+	for range 3 { // want "retrying a check or test body"
+		passed := test.Short()
+		passed = t.Run("attempt", body)
+		if passed {
+			return
+		}
+	}
+}
+
+func TestRetryAfterConditionallyReplacingShortMode(t *test.T) {
+	for range 3 { // want "retrying a check or test body"
+		passed := test.Short()
+		if test.Verbose() {
+			passed = checkPassed()
+		}
+		if passed {
+			return
+		}
+	}
+}
+
+func checkPassed() bool { return check() == nil }
+
 func TestRetryUntilSwitchSuccessFallsThrough(t *test.T) {
 	for range 3 { // want "retrying a check or test body"
 		switch false {

@@ -32,6 +32,7 @@ type outcomePolarity uint8
 const (
 	failsWhenTrue outcomePolarity = 1 << iota
 	failsWhenFalse
+	shortMode
 )
 
 func runFlakes(pass *analysis.Pass) (any, error) {
@@ -323,7 +324,8 @@ func (c *flakeChecks) matchSwitchCases(body *ast.BlockStmt, tag ast.Expr, visit 
 func (c *flakeChecks) constrainSwitchCase(tag, expr ast.Expr, matches bool, attempt ast.Node) bool {
 	condition, trueOnMatch := c.switchCondition(tag, expr)
 	if condition == nil {
-		return attempt != nil && matches && errorComparedWithNil(c.info, tag, expr, attempt)
+		// Matching nil proves success. Missing nil proves failure.
+		return matches == (attempt != nil) && errorComparedWithNil(c.info, tag, expr, attempt)
 	}
 	truth := matches == trueOnMatch
 	guarded := c.failureCondition(condition, truth == (attempt == nil), attempt)
@@ -354,8 +356,19 @@ func mergeOutcomes(dst, src map[types.Object]outcomePolarity) map[types.Object]o
 	if dst == nil {
 		return maps.Clone(src)
 	}
+	if src == nil {
+		return dst
+	}
+	// The exemption applies only when every incoming path carries short mode.
+	for object, polarity := range dst {
+		if polarity == shortMode && src[object] != shortMode {
+			delete(dst, object)
+		}
+	}
 	for object, polarity := range src {
-		dst[object] |= polarity
+		if polarity != shortMode {
+			dst[object] |= polarity
+		}
 	}
 	return dst
 }
@@ -370,6 +383,10 @@ func (c flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int) []ou
 		if !booleanResult(c.info, value) {
 			continue
 		}
+		if c.isShortMode(value) {
+			outcomes[i] = shortMode
+			continue
+		}
 		if c.failureCondition(value, true, nil) {
 			outcomes[i] |= failsWhenTrue
 		}
@@ -380,11 +397,29 @@ func (c flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int) []ou
 	return outcomes
 }
 
+func (c flakeChecks) isShortMode(value ast.Expr) bool {
+	switch expr := ast.Unparen(value).(type) {
+	case *ast.CallExpr:
+		return packageCall(c.info, expr, "testing", "Short")
+	case *ast.Ident:
+		return c.outcomes[c.info.ObjectOf(expr)] == shortMode
+	case *ast.UnaryExpr:
+		return expr.Op == token.NOT && c.isShortMode(expr.X)
+	case *ast.BinaryExpr:
+		operand, _ := booleanComparison(c.info, expr)
+		return c.isShortMode(operand)
+	}
+	return false
+}
+
 // A branch testing a stored outcome can only carry its matching polarity.
 func (c flakeChecks) constrainOutcome(condition ast.Expr, possible outcomePolarity) {
 	switch expr := ast.Unparen(condition).(type) {
 	case *ast.Ident:
-		c.storeOutcome(expr, c.outcomes[c.info.Uses[expr]]&possible)
+		polarity := c.outcomes[c.info.Uses[expr]]
+		if polarity != shortMode {
+			c.storeOutcome(expr, polarity&possible)
+		}
 	case *ast.UnaryExpr:
 		if expr.Op == token.NOT {
 			c.constrainOutcome(expr.X, possible^(failsWhenTrue|failsWhenFalse))
@@ -477,10 +512,14 @@ func (c flakeChecks) failureCondition(condition ast.Expr, failure bool, attempt 
 		case testingMethod(c.info, expr, "Run"):
 			return !failure
 		case attempt != nil:
-			return !failure && booleanResult(c.info, expr) && !packageCall(c.info, expr, "testing", "Short")
+			return !failure && booleanResult(c.info, expr) && !c.isShortMode(expr)
 		}
 	case *ast.Ident:
-		if polarity := c.outcomes[c.info.ObjectOf(expr)]; polarity != 0 && attemptResult(c.info, expr, attempt) {
+		polarity := c.outcomes[c.info.ObjectOf(expr)]
+		if polarity == shortMode {
+			return false
+		}
+		if polarity != 0 && attemptResult(c.info, expr, attempt) {
 			if failure {
 				return polarity&failsWhenTrue != 0
 			}

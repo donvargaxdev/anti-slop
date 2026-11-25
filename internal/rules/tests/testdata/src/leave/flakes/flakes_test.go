@@ -54,6 +54,54 @@ func TestNumericCases(t *testing.T) {
 	}
 }
 
+func TestStopOnStoredShortMode(t *testing.T) {
+	for i := 0; i < 3; i++ {
+		short := testing.Short()
+		if short {
+			break
+		}
+		t.Run("case", func(t *testing.T) {})
+	}
+}
+
+func TestStopOnCopiedShortMode(t *testing.T) {
+	for range 3 {
+		short := testing.Short()
+		var full = !short
+		if short {
+			t.Log("short mode")
+		} else {
+			full = short == false
+		}
+		switch full {
+		case true:
+			return
+		}
+	}
+}
+
+func TestSkipInUnrelatedErrorSwitchCase(t *testing.T) {
+	switch err := check(); err {
+	case nil:
+		t.Skip("optional")
+	default:
+		t.Log(err)
+	}
+
+	switch err := check(); err {
+	case os.ErrInvalid:
+	default:
+		t.Skip("optional")
+	}
+
+	switch err := check(); err {
+	case nil:
+		fallthrough
+	default:
+		t.Skip("optional")
+	}
+}
+
 func TestContinueToNextCase(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		if err := validate(i); err != nil {
