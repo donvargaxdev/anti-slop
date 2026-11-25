@@ -65,6 +65,32 @@ func pollDeadlineInCondition() {
 	}
 }
 
+func pollDeadlineBeforeHelperRuns() {
+	ch := After(Millisecond)
+	for range 1 { // want "polling against the wall clock"
+		clearDeadline(&ch, <-ch)
+	}
+}
+
+func clearDeadline(ch *<-chan Time, _ Time) { *ch = nil }
+
+func pollDeadlineBeforeDeferredHelperRuns() {
+	ch := After(Millisecond)
+	defer clearDeadline(&ch, Time{})
+	for range 1 { // want "polling against the wall clock"
+		<-ch
+	}
+}
+
+func pollDeadlineAfterPointerConversion() {
+	ch := After(Millisecond)
+	_ = (*<-chan Time)(&ch)
+	println(&ch)
+	for range 1 { // want "polling against the wall clock"
+		<-ch
+	}
+}
+
 func pollWithImmediatePredicate() {
 	start := Now()
 	for (func() bool { return Since(start) < Second })() { // want "polling against the wall clock"

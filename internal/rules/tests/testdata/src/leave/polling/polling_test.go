@@ -870,3 +870,15 @@ func TestDeferredReceiveAfterDeadlineReplacement(t *testing.T) {
 	}()
 	ch = ready
 }
+
+func TestReceiveAfterHelperReplacesDeadline(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	replaceDeadline((&(ch)), ready)
+	for range 3 {
+		<-ch
+	}
+}
+
+func replaceDeadline(ch *<-chan time.Time, ready <-chan time.Time) { *ch = ready }

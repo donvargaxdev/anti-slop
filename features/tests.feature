@@ -279,6 +279,18 @@ Feature: Test reliability
           ch = ready
       }
 
+      func TestReceiveAfterHelperReplacesDeadline(t *testing.T) {
+          ready := make(chan time.Time)
+          close(ready)
+          ch := time.After(time.Second)
+          replaceDeadline(&ch, ready)
+          for range 3 {
+              <-ch
+          }
+      }
+
+      func replaceDeadline(ch *<-chan time.Time, ready <-chan time.Time) { *ch = ready }
+
       func TestSkipWithZeroNamedError(t *testing.T) {
           _ = func() (err error) {
               if err != nil {

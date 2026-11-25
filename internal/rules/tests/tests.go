@@ -3,6 +3,7 @@ package tests
 import (
 	"go/ast"
 	"go/constant"
+	"go/token"
 	"go/types"
 	"strings"
 	"unicode/utf8"
@@ -83,6 +84,21 @@ func immediateLiteral(call *ast.CallExpr, parent ast.Node) *ast.FuncLit {
 	}
 	literal, _ := ast.Unparen(call.Fun).(*ast.FuncLit)
 	return literal
+}
+
+// After evaluating the arguments, a call can write through their addresses.
+func forgetCallWrites[V any](info *types.Info, call *ast.CallExpr, parent ast.Node, tracked map[types.Object]V) {
+	callee := info.Types[call.Fun]
+	if _, deferred := parent.(*ast.DeferStmt); deferred || callee.IsType() || callee.IsBuiltin() {
+		return
+	}
+	for _, arg := range call.Args {
+		if address, ok := ast.Unparen(arg).(*ast.UnaryExpr); ok && address.Op == token.AND {
+			if name, ok := ast.Unparen(address.X).(*ast.Ident); ok {
+				delete(tracked, info.Uses[name])
+			}
+		}
+	}
 }
 
 func invokesLiteral(literal *ast.FuncLit, parents []ast.Node) bool {

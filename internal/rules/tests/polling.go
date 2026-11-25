@@ -174,9 +174,14 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 	case *ast.CallExpr:
 		literal := immediateLiteral(expr, parent)
 		if literal == nil {
-			return true
+			scan.record(expr.Fun)
+			for _, arg := range expr.Args {
+				scan.record(arg)
+			}
+			forgetCallWrites(scan.info, expr, parent, scan.tracked)
+		} else {
+			scan.recordImmediateCall(expr, literal)
 		}
-		scan.recordImmediateCall(expr, literal)
 	case *ast.BinaryExpr:
 		if expr.Op != token.LAND && expr.Op != token.LOR {
 			return true
