@@ -13,7 +13,7 @@ import (
 	"fmt"
 
 	"github.com/donvargaxdev/anti-slop/internal/cli"
-	"github.com/donvargaxdev/anti-slop/internal/slices/comments/port"
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
 )
 
 // CLI is the comments command's command line: the packages it checks.

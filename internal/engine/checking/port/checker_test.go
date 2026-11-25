@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/donvargaxdev/anti-slop/internal/slices/comments/port"
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
 )
 
 func TestFindingIsALineOfOutput(t *testing.T) {
