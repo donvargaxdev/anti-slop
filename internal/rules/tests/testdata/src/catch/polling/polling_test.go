@@ -452,3 +452,40 @@ func TestPollWithConditionAssignedInBranch(t *testing.T) {
 		}
 	}
 }
+
+func TestPollWithSampleFromPreviousIteration(t *testing.T) {
+	start := Now()
+	var elapsed Duration
+	for { // want "polling against the wall clock"
+		if elapsed > Second {
+			t.Fatal("timeout")
+		}
+		elapsed = Since(start)
+	}
+}
+
+func TestPollWithSampleFromContinueAndPost(t *testing.T) {
+	start := Now()
+	var elapsed, sample Duration
+	for ; ; elapsed = sample { // want "polling against the wall clock"
+		if elapsed > Second {
+			t.Fatal("timeout")
+		}
+		if testing.Short() {
+			sample = Since(start)
+			continue
+		}
+		sample = 0
+	}
+}
+
+func TestPollWithSamplePassedAcrossIterations(t *testing.T) {
+	start := Now()
+	var elapsed, sample Duration
+	for range 3 { // want "polling against the wall clock"
+		if elapsed > Second {
+			t.Fatal("timeout")
+		}
+		elapsed, sample = sample, Since(start)
+	}
+}

@@ -33,25 +33,31 @@ const (
 func runFlakes(pass *analysis.Pass) (any, error) {
 	info := pass.TypesInfo
 	checks := flakeChecks{info: info, outcomes: make(map[types.Object]outcomePolarity)}
-	skips := make(map[token.Pos]bool)
+	reported := make(map[token.Pos]bool)
+	reportOnce := func(node ast.Node, reason string) {
+		if !reported[node.Pos()] {
+			report(pass, node, reason)
+			reported[node.Pos()] = true
+		}
+	}
 	visitTestFiles(pass, func(file *ast.File) {
 		checks.walk(file, func(checks flakeChecks, node, _ ast.Node) bool {
-			checks.reportFinding(pass, node, skips)
+			checks.reportFinding(node, reportOnce)
 			return true
 		})
 	})
 	return nil, nil
 }
 
-func (c flakeChecks) reportFinding(pass *analysis.Pass, node ast.Node, skips map[token.Pos]bool) {
+func (c flakeChecks) reportFinding(node ast.Node, reportOnce func(ast.Node, string)) {
 	switch stmt := node.(type) {
 	case *ast.ForStmt:
 		if c.retriesInHeader(stmt) || c.retriesLoop(stmt.Body) {
-			report(pass, stmt, "retrying a check or test body")
+			reportOnce(stmt, "retrying a check or test body")
 		}
 	case *ast.RangeStmt:
 		if c.retriesLoop(stmt.Body) {
-			report(pass, stmt, "retrying a check or test body")
+			reportOnce(stmt, "retrying a check or test body")
 		}
 	case *ast.IfStmt:
 		for _, branch := range c.outcomeBranches(stmt, true, nil) {
@@ -59,17 +65,16 @@ func (c flakeChecks) reportFinding(pass *analysis.Pass, node ast.Node, skips map
 				continue
 			}
 			contains(branch, func(node ast.Node) bool {
-				if call, ok := node.(*ast.CallExpr); ok && !skips[call.Pos()] &&
+				if call, ok := node.(*ast.CallExpr); ok &&
 					testingMethod(c.info, call, "Skip", "Skipf", "SkipNow") {
-					report(pass, call, "skipping after a failure")
-					skips[call.Pos()] = true
+					reportOnce(call, "skipping after a failure")
 				}
 				return false
 			})
 		}
 	case *ast.CallExpr:
 		if wrapsTestInRetry(c.info, stmt) {
-			report(pass, stmt, "retrying a test body")
+			reportOnce(stmt, "retrying a test body")
 		}
 	}
 }
@@ -92,7 +97,9 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 			if visit(*c, stmt, parent) {
 				c.walk(stmt.Cond, visit)
 				then := c.fork()
+				then.constrainOutcome(stmt.Cond, failsWhenTrue)
 				then.walk(stmt.Body, visit)
+				c.constrainOutcome(stmt.Cond, failsWhenFalse)
 				c.walk(stmt.Else, visit)
 				c.outcomes = mergeOutcomes(c.outcomes, then.outcomes)
 			}
@@ -108,20 +115,20 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 		switch stmt := node.(type) {
 		case *ast.ForStmt:
 			c.walk(stmt.Init, visit)
-			c.walk(stmt.Cond, visit)
-			iteration := c.withTarget(label, true)
-			c.walkLoop(iteration, stmt.Body, stmt.Post, forMaySkip(c.info, stmt.Cond), visit)
+			c.walkLoop(label, stmt.Body, stmt.Post, forMaySkip(c.info, stmt.Cond), visit, func(iteration *flakeChecks) {
+				iteration.walk(stmt.Cond, visit)
+			})
 			return false
 		case *ast.RangeStmt:
 			c.walk(stmt.X, visit)
-			iteration := c.withTarget(label, true)
-			for _, target := range [...]ast.Expr{stmt.Key, stmt.Value} {
-				c.walk(target, visit)
-				if name, ok := ast.Unparen(target).(*ast.Ident); ok {
-					iteration.storeOutcome(name, 0)
+			c.walkLoop(label, stmt.Body, nil, rangeMayBeEmpty(c.info, stmt.X), visit, func(iteration *flakeChecks) {
+				for _, target := range [...]ast.Expr{stmt.Key, stmt.Value} {
+					iteration.walk(target, visit)
+					if name, ok := ast.Unparen(target).(*ast.Ident); ok {
+						iteration.storeOutcome(name, 0)
+					}
 				}
-			}
-			c.walkLoop(iteration, stmt.Body, nil, rangeMayBeEmpty(c.info, stmt.X), visit)
+			})
 			return false
 		case *ast.SwitchStmt:
 			c.walk(stmt.Init, visit)
@@ -135,6 +142,12 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 			return false
 		case *ast.SelectStmt:
 			c.walkCommunications(stmt.Body, label, visit)
+			return false
+		case *ast.ReturnStmt:
+			for _, result := range stmt.Results {
+				c.walk(result, visit)
+			}
+			c.outcomes = nil
 			return false
 		case *ast.BranchStmt:
 			if stmt.Tok == token.BREAK || stmt.Tok == token.CONTINUE {
@@ -189,16 +202,27 @@ func (c *flakeChecks) recordBranch(stmt *ast.BranchStmt) {
 	c.outcomes = nil
 }
 
-func (c *flakeChecks) walkLoop(iteration *flakeChecks, body *ast.BlockStmt, post ast.Stmt, maySkip bool, visit func(flakeChecks, ast.Node, ast.Node) bool) {
-	iteration.walk(body, visit)
-	// Continue runs the post statement. Break reaches the next statement directly.
-	iteration.outcomes = mergeOutcomes(iteration.outcomes, iteration.target.continues)
-	iteration.walk(post, visit)
-	exits := mergeOutcomes(iteration.outcomes, iteration.target.breaks)
-	if maySkip {
-		exits = mergeOutcomes(exits, c.outcomes)
+func (c *flakeChecks) walkLoop(label types.Object, body *ast.BlockStmt, post ast.Stmt, maySkip bool, visit func(flakeChecks, ast.Node, ast.Node) bool, beforeBody func(*flakeChecks)) {
+	entry := c.withTarget(label, true)
+	for {
+		iteration := entry.fork()
+		beforeBody(iteration)
+		iteration.walk(body, visit)
+		// Continue runs the post statement. Break reaches the next statement directly.
+		iteration.outcomes = mergeOutcomes(iteration.outcomes, entry.target.continues)
+		iteration.walk(post, visit)
+		// The next iteration can also start with values from the first entry.
+		next := mergeOutcomes(maps.Clone(entry.outcomes), iteration.outcomes)
+		if maps.Equal(entry.outcomes, next) {
+			exits := mergeOutcomes(iteration.outcomes, entry.target.breaks)
+			if maySkip {
+				exits = mergeOutcomes(exits, c.outcomes)
+			}
+			c.outcomes = exits
+			return
+		}
+		entry.outcomes = next
 	}
-	c.outcomes = exits
 }
 
 func (c *flakeChecks) walkCommunications(body *ast.BlockStmt, label types.Object, visit func(flakeChecks, ast.Node, ast.Node) bool) {
@@ -270,6 +294,18 @@ func (c flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int) []ou
 		}
 	}
 	return outcomes
+}
+
+// A branch testing a stored outcome can only carry its matching polarity.
+func (c flakeChecks) constrainOutcome(condition ast.Expr, possible outcomePolarity) {
+	switch expr := ast.Unparen(condition).(type) {
+	case *ast.Ident:
+		c.storeOutcome(expr, c.outcomes[c.info.Uses[expr]]&possible)
+	case *ast.UnaryExpr:
+		if expr.Op == token.NOT {
+			c.constrainOutcome(expr.X, possible^(failsWhenTrue|failsWhenFalse))
+		}
+	}
 }
 
 func (c flakeChecks) storeOutcome(name *ast.Ident, polarity outcomePolarity) {

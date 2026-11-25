@@ -408,3 +408,46 @@ func skipAfterEmptyRange(t *test.T, values []bool) {
 		t.Skip("failed") // want "skipping after a failure"
 	}
 }
+
+func TestSkipOnFailureFromPreviousIteration(t *test.T) {
+	failed := false
+	for range 3 {
+		retry(func() { t.Log("body") }) // want "retrying a test body"
+		if failed {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+		failed = t.Failed()
+	}
+}
+
+func skipInReturnedSubtest(t *test.T) bool {
+	return t.Run("subtest", func(t *test.T) {
+		if t.Failed() {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+	})
+}
+
+func TestSkipOnOutcomeWithNewPolarity(t *test.T) {
+	ok := t.Run("subtest", func(t *test.T) {})
+	for range 3 {
+		if ok {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+		ok = !ok
+	}
+}
+
+func TestSkipOnFailureFromContinueAndPost(t *test.T) {
+	failed, previous := false, false
+	for i := 0; i < 3; i, previous = i+1, failed {
+		if previous {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+		if test.Short() {
+			failed = t.Failed()
+			continue
+		}
+		failed = false
+	}
+}

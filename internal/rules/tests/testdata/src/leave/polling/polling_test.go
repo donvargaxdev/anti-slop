@@ -383,3 +383,28 @@ func TestReceiveAfterReturningBranch(t *testing.T) {
 		<-ch
 	}
 }
+
+func TestClockSampleOnBreakDoesNotReachNextIteration(t *testing.T) {
+	start := time.Now()
+	var elapsed time.Duration
+	for range 3 {
+		if elapsed > time.Second {
+			t.Fatal("timeout")
+		}
+		if testing.Short() {
+			elapsed = time.Since(start)
+			break
+		}
+	}
+}
+
+func TestRangeOverwritesClockSampleFromPreviousIteration(t *testing.T) {
+	start := time.Now()
+	var elapsed time.Duration
+	for _, elapsed = range [3]time.Duration{} {
+		if elapsed > time.Second {
+			t.Fatal("timeout")
+		}
+		elapsed = time.Since(start)
+	}
+}

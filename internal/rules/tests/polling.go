@@ -320,11 +320,13 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 	var body *ast.BlockStmt
 	var condition ast.Expr
 	var post ast.Stmt
+	var rangeLoop *ast.RangeStmt
 	switch loop := node.(type) {
 	case *ast.ForStmt:
 		body, condition, post = loop.Body, loop.Cond, loop.Post
 	case *ast.RangeStmt:
 		body = loop.Body
+		rangeLoop = loop
 	default:
 		return false
 	}
@@ -332,9 +334,9 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 		return true
 	}
 
-	target := &branchTarget[bool]{isLoop: true}
+	var label types.Object
 	if labeled, ok := parents[len(parents)-1].(*ast.LabeledStmt); ok {
-		target.label = info.Defs[labeled.Label]
+		label = info.Defs[labeled.Label]
 	}
 	// Start with an empty state so a fixed snapshot taken before the loop does
 	// not count as polling. Record each guard with the values that reach it.
@@ -345,17 +347,15 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 			return readsClock(info, expr) || usesTrackedValue(info, expr, tracked)
 		},
 		clockGuards: make(map[*ast.IfStmt]bool),
-		target:      target,
 	}
-	scan.record(body)
-	if condition != nil {
-		scan.tracked = mergeTracked(scan.tracked, target.continues)
-		scan.record(post)
-		if usesTrackedValue(info, condition, scan.tracked) {
-			return true
+	clockInHeader := false
+	scan.recordLoop(label, false, body, post, func(iteration *pollingScan) {
+		if rangeLoop != nil {
+			iteration.recordRangeAssignment(rangeLoop)
 		}
-	}
-	return pollsInBody(info, body, receives, scan.clockGuards)
+		clockInHeader = clockInHeader || usesTrackedValue(info, condition, iteration.tracked)
+	})
+	return clockInHeader || pollsInBody(info, body, receives, scan.clockGuards)
 }
 
 func usesTrackedValue(info *types.Info, expr ast.Expr, tracked map[types.Object]bool) bool {

@@ -353,3 +353,51 @@ func TestSwitchBreakDoesNotExitLoop(t *testing.T) {
 		t.Skip("optional test")
 	}
 }
+
+func TestSkipAfterReturningBranch(t *testing.T) {
+	failed := t.Failed()
+	if testing.Short() {
+		failed = false
+	} else {
+		return
+	}
+	if failed {
+		t.Skip("optional test")
+	}
+}
+
+func TestFailureOnBreakDoesNotReachNextIteration(t *testing.T) {
+	failed := false
+	for range 3 {
+		if failed {
+			t.Skip("optional test")
+		}
+		if testing.Short() {
+			failed = t.Failed()
+			break
+		}
+	}
+}
+
+func TestNegatedOutcomeOnBreakDoesNotReachNextIteration(t *testing.T) {
+	ok := true
+	for i := range 3 {
+		if !ok {
+			t.Skip("optional test")
+		}
+		ok = t.Run(strconv.Itoa(i), func(t *testing.T) {})
+		if !ok {
+			break
+		}
+	}
+}
+
+func TestRangeOverwritesFailureFromPreviousIteration(t *testing.T) {
+	failed := false
+	for _, failed = range [3]bool{} {
+		if failed {
+			t.Skip("optional test")
+		}
+		failed = t.Failed()
+	}
+}
