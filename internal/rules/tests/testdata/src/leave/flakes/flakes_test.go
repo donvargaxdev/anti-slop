@@ -469,10 +469,13 @@ func singleAttempt() {
 	}
 }
 
-func TestComparedSuccess(t *testing.T) {
+func TestComparedTestSuccess(t *testing.T) {
 	if !t.Failed() == true {
 		t.Skip("optional")
 	}
+}
+
+func TestComparedSubtestSuccess(t *testing.T) {
 	if false != t.Run("body", func(t *testing.T) {}) {
 		t.Skip("optional")
 	}
@@ -626,4 +629,18 @@ func TestLaterCaseAfterNonmatchingFailure(t *testing.T) {
 			t.Skip("optional")
 		}
 	}
+}
+
+func TestSkipAfterOptionalFailurePath(t *testing.T) {
+	if t.Failed() {
+		t.Log("failed")
+	}
+	t.Skip("optional")
+}
+
+func TestSkipAfterOptionalSuccessPath(t *testing.T) {
+	if !t.Failed() {
+		t.Log("passed")
+	}
+	t.Skip("optional")
 }

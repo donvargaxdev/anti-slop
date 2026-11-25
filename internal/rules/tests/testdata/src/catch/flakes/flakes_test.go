@@ -672,3 +672,32 @@ func TestFallthroughCarriesFailureToLaterBody(t *test.T) {
 		}
 	}
 }
+
+func TestSkipAfterReturningOnSuccess(t *test.T) {
+	if !t.Failed() {
+		return
+	}
+	t.Skip("failed") // want "skipping after a failure"
+}
+
+func TestSkipAfterSuccessBranchTerminates(t *test.T) {
+	if t.Failed() {
+		t.Log("failed")
+	} else {
+		t.Skip("optional")
+	}
+	t.SkipNow() // want "skipping after a failure"
+}
+
+func TestSkipAfterBothPathsRequireFailure(t *test.T) {
+	if test.Short() {
+		if !t.Failed() {
+			return
+		}
+	} else {
+		if t.Run("body", func(t *test.T) {}) {
+			return
+		}
+	}
+	t.Skip("failed") // want "skipping after a failure"
+}

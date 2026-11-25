@@ -100,6 +100,9 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 				otherwise.failureGuard = c.failureGuard || c.failureCondition(stmt.Cond, false, nil)
 				otherwise.constrainOutcome(stmt.Cond, failsWhenFalse)
 				otherwise.walk(stmt.Else, visit)
+				// Every path that reaches the next statement must require failure.
+				c.failureGuard = (then.outcomes == nil || then.failureGuard) &&
+					(otherwise.outcomes == nil || otherwise.failureGuard)
 				c.outcomes = mergeOutcomes(otherwise.outcomes, then.outcomes)
 			}
 			return false

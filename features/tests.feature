@@ -86,6 +86,13 @@ Feature: Test reliability
           for ; !ready(); <-time.After(time.Millisecond) {
           }
       }
+
+      func TestSkipAfterGuard(t *testing.T) {
+          if !t.Failed() {
+              return
+          }
+          t.Skip("failed")
+      }
       """
     When anti-slop runs with "tests ./..."
     Then it exits with code 0
@@ -100,6 +107,7 @@ Feature: Test reliability
       p_test.go:52:5: tests: polling against the wall clock
       p_test.go:61:5: tests: polling against the wall clock
       p_test.go:63:5: tests: polling against the wall clock
+      p_test.go:71:5: tests: skipping after a failure
       """
     And its error output is empty
 
