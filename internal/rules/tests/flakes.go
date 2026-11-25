@@ -447,6 +447,12 @@ func (c *flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int, vis
 			outcomes[i] = c.constantAssignment(constant.BoolVal(constantValue))
 			continue
 		}
+		if c.failureGuard && c.retry == nil && !c.retryHeader {
+			// Either value requires failure on this path. Retry scans need
+			// the outcome of the current attempt, which can differ.
+			outcomes[i] = guardedTrue | guardedFalse
+			continue
+		}
 		outcomes[i] = c.booleanOutcome(value)
 		if c.retryHeader && outcomes[i] == 0 && c.retryBooleanCheck(value) {
 			outcomes[i] = failsWhenFalse

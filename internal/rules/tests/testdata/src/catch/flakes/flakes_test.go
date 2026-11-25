@@ -1216,3 +1216,24 @@ func TestSkipOnNamedFlagWithImplicitZeroValue(t *test.T) {
 		t.Skip("failed") // want "skipping after a failure"
 	}
 }
+
+func TestSkipOnFlagAssignedAfterFailure(t *test.T) {
+	enabled := test.Verbose()
+	skip := false
+	if t.Failed() {
+		skip = enabled
+	}
+	if skip {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnFlagAssignedShortModeAfterFailure(t *test.T) {
+	ready := true
+	if t.Failed() {
+		ready = test.Short()
+	}
+	if !ready {
+		t.SkipNow() // want "skipping after a failure"
+	}
+}

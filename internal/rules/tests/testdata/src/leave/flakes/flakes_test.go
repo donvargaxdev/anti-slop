@@ -1325,3 +1325,24 @@ func TestSkipOnNamedFlagWithIndependentReason(t *testing.T) {
 		t.Skip("optional")
 	}
 }
+
+func TestSkipOnNonconstantFlagWithIndependentReason(t *testing.T) {
+	skip := testing.Short()
+	if t.Failed() {
+		skip = testing.Verbose()
+	}
+	if skip {
+		t.Skip("optional")
+	}
+}
+
+func stopIteratingAfterFailure(t *testing.T, keepAfterFailure bool) {
+	keepGoing := true
+	for i := 0; i < 3 && keepGoing; i++ {
+		if t.Failed() {
+			keepGoing = keepAfterFailure
+		} else {
+			keepGoing = false
+		}
+	}
+}
