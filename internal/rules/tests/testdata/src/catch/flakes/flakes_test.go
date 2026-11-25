@@ -265,3 +265,51 @@ func TestGenericRetry(t *test.T) {
 	retrySubtest[test.T](body)                 // want "retrying a test body"
 	retryTest[test.T, string]("context", body) // want "retrying a test body"
 }
+
+func TestSkipAfterUnmatchedSwitch(t *test.T) {
+	failed := t.Failed()
+	switch {
+	case test.Short():
+		failed = false
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipAfterSwitchCases(t *test.T) {
+	var failed bool
+	switch {
+	case test.Short():
+		failed = t.Failed()
+	default:
+		failed = false
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipAfterUnmatchedTypeSwitch(t *test.T) {
+	failed := t.Failed()
+	switch any(t).(type) {
+	case string:
+		failed = false
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipAfterFallthrough(t *test.T) {
+	var failed bool
+	switch {
+	case test.Short():
+		failed = t.Failed()
+		fallthrough
+	default:
+		if failed {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+	}
+}

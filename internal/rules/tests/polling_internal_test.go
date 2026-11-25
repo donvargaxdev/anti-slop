@@ -11,9 +11,9 @@ func TestDeadlineScanWithUnmatchedBreakLabel(t *testing.T) {
 	label := ast.NewIdent("outer")
 	target := types.NewLabel(token.NoPos, nil, "outer")
 	channel := types.NewVar(token.NoPos, nil, "deadline", types.NewChan(types.RecvOnly, types.Typ[types.Int]))
-	scan := deadlineScan{
-		info:     &types.Info{Uses: map[*ast.Ident]types.Object{label: target}},
-		channels: map[types.Object]bool{channel: true},
+	scan := pollingScan{
+		info:    &types.Info{Uses: map[*ast.Ident]types.Object{label: target}},
+		tracked: map[types.Object]bool{channel: true},
 	}
 
 	// Type-checked fixtures cannot contain a break to an unregistered label.
@@ -21,7 +21,7 @@ func TestDeadlineScanWithUnmatchedBreakLabel(t *testing.T) {
 		&ast.BranchStmt{Tok: token.BREAK, Label: label},
 	}}}
 	scan.record(loop)
-	if !scan.channels[channel] {
+	if !scan.tracked[channel] {
 		t.Error("the unresolved branch lost the incoming deadline")
 	}
 }

@@ -73,8 +73,7 @@ func (c flakeChecks) reportFinding(pass *analysis.Pass, node ast.Node, skips map
 	}
 }
 
-// walk visits an if after its initializer. Both branches start with that same
-// outcome state, and either branch can supply the outcome after the if.
+// walk tracks stored outcomes in source order and joins alternative branches.
 func (c flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.Node) bool) {
 	if root == nil {
 		return
@@ -92,9 +91,7 @@ func (c flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.N
 				then.outcomes = maps.Clone(c.outcomes)
 				then.walk(stmt.Body, visit)
 				c.walk(stmt.Else, visit)
-				for object, polarity := range then.outcomes {
-					c.outcomes[object] |= polarity
-				}
+				mergeOutcomes(c.outcomes, then.outcomes)
 			}
 			return false
 		}
@@ -102,6 +99,16 @@ func (c flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.N
 			return false
 		}
 		switch stmt := node.(type) {
+		case *ast.SwitchStmt:
+			c.walk(stmt.Init, visit)
+			c.walk(stmt.Tag, visit)
+			c.walkCases(stmt.Body, visit)
+			return false
+		case *ast.TypeSwitchStmt:
+			c.walk(stmt.Init, visit)
+			c.walk(stmt.Assign, visit)
+			c.walkCases(stmt.Body, visit)
+			return false
 		case *ast.FuncLit:
 			body := c
 			body.outcomes = maps.Clone(c.outcomes)
@@ -122,6 +129,42 @@ func (c flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.N
 		}
 		return true
 	})
+}
+
+func (c flakeChecks) walkCases(body *ast.BlockStmt, visit func(flakeChecks, ast.Node, ast.Node) bool) {
+	merged := make(map[types.Object]outcomePolarity)
+	var fallingThrough map[types.Object]outcomePolarity
+	hasDefault := false
+	for _, stmt := range body.List {
+		clause := stmt.(*ast.CaseClause)
+		hasDefault = hasDefault || clause.List == nil
+		branch := c
+		branch.outcomes = maps.Clone(c.outcomes)
+		for _, expr := range clause.List {
+			branch.walk(expr, visit)
+		}
+		// Fallthrough enters the next body without evaluating the case expressions.
+		mergeOutcomes(branch.outcomes, fallingThrough)
+		for _, stmt := range clause.Body {
+			branch.walk(stmt, visit)
+		}
+		if len(clause.Body) > 0 && isFallthrough(clause.Body[len(clause.Body)-1]) {
+			fallingThrough = branch.outcomes
+		} else {
+			fallingThrough = nil
+			mergeOutcomes(merged, branch.outcomes)
+		}
+	}
+	if hasDefault {
+		clear(c.outcomes)
+	}
+	mergeOutcomes(c.outcomes, merged)
+}
+
+func mergeOutcomes(dst, src map[types.Object]outcomePolarity) {
+	for object, polarity := range src {
+		dst[object] |= polarity
+	}
 }
 
 // assignmentOutcomes reads the incoming state before any target is updated.

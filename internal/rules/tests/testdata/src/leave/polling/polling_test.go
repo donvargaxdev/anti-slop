@@ -302,3 +302,36 @@ func TestTimingDoesNotExitLoop(t *testing.T) {
 		}
 	}
 }
+
+func TestLoopRecordsUnrelatedSample(t *testing.T) {
+	sample := time.Now()
+	for i := 0; i < 3; i++ {
+		sample = time.Now()
+		t.Log(sample)
+	}
+}
+
+func TestLoopDiscardsSampleBeforeCondition(t *testing.T) {
+	ready := true
+	for ready {
+		ready = time.Now().IsZero()
+		t.Log(ready)
+		ready = false
+	}
+}
+
+func TestLoopDiscardsSampleInPost(t *testing.T) {
+	ready := true
+	for ; ready; ready = false {
+		ready = time.Now().IsZero()
+		t.Log(ready)
+	}
+}
+
+func TestLoopShadowsSample(t *testing.T) {
+	now := time.Now()
+	for i := 0; i < 3 && !now.IsZero(); i++ {
+		now := time.Now()
+		t.Log(now)
+	}
+}

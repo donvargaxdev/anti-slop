@@ -383,3 +383,33 @@ func TestPollUntilFailNow(t *testing.T) {
 		}
 	}
 }
+
+func TestClockRefreshedInLoopBody(t *testing.T) {
+	now := Now()
+	end := now.Add(Second)
+	for now.Before(end) { // want "polling against the wall clock"
+		now = Now()
+	}
+}
+
+func TestClockRefreshedThroughTemporary(t *testing.T) {
+	start := Now()
+	var elapsed Duration
+	for elapsed < Second { // want "polling against the wall clock"
+		sample := Since(start)
+		elapsed = sample
+	}
+}
+
+func TestClockRefreshedBeforeContinue(t *testing.T) {
+	start := Now()
+	var elapsed Duration
+poll:
+	for elapsed < Second { // want "polling against the wall clock"
+		if testing.Short() {
+			elapsed = Since(start)
+			continue poll
+		}
+		elapsed = Second
+	}
+}

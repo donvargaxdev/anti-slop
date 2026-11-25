@@ -19,32 +19,35 @@ var Polling = &analysis.Analyzer{
 func runPolling(pass *analysis.Pass) (any, error) {
 	info := pass.TypesInfo
 	receives := deadlineReceives(pass)
-	visitTests(pass, func(node ast.Node) {
-		var pollsInHeader bool
-		var body *ast.BlockStmt
-		switch loop := node.(type) {
-		case *ast.ForStmt:
-			body = loop.Body
-			// The initializer takes one sample. The post statement can refresh it.
-			pollsInHeader = readsClock(info, loop.Cond) || usesClockAssignment(info, loop.Cond, loop.Post)
-		case *ast.RangeStmt:
-			body = loop.Body
-		default:
-			return
-		}
-		if pollsInHeader || pollsInBody(info, body, receives) {
-			report(pass, node, "polling against the wall clock")
-		}
+	visitTestFiles(pass, func(file *ast.File) {
+		ast.PreorderStack(file, nil, func(node ast.Node, parents []ast.Node) bool {
+			var pollsInCondition bool
+			var body *ast.BlockStmt
+			switch loop := node.(type) {
+			case *ast.ForStmt:
+				body = loop.Body
+				pollsInCondition = readsClock(info, loop.Cond) || clockFeedsCondition(info, loop, parents[len(parents)-1])
+			case *ast.RangeStmt:
+				body = loop.Body
+			default:
+				return true
+			}
+			if pollsInCondition || pollsInBody(info, body, receives) {
+				report(pass, node, "polling against the wall clock")
+			}
+			return true
+		})
 	})
 	return nil, nil
 }
 
-type deadlineScan struct {
+type pollingScan struct {
 	info *types.Info
-	// A nil channel map marks a path that branched away.
-	channels map[types.Object]bool
-	receives map[*ast.UnaryExpr]bool
-	target   *branchTarget
+	// A nil map marks a path that branched away.
+	tracked   map[types.Object]bool
+	dependsOn func(ast.Expr, map[types.Object]bool) bool
+	receives  map[*ast.UnaryExpr]bool
+	target    *branchTarget
 }
 
 type branchTarget struct {
@@ -56,9 +59,12 @@ type branchTarget struct {
 }
 
 func deadlineReceives(pass *analysis.Pass) map[*ast.UnaryExpr]bool {
-	scan := deadlineScan{
-		info:     pass.TypesInfo,
-		channels: make(map[types.Object]bool),
+	scan := pollingScan{
+		info:    pass.TypesInfo,
+		tracked: make(map[types.Object]bool),
+		dependsOn: func(expr ast.Expr, tracked map[types.Object]bool) bool {
+			return afterDeadline(pass.TypesInfo, expr, tracked)
+		},
 		receives: make(map[*ast.UnaryExpr]bool),
 	}
 	visitTestFiles(pass, func(file *ast.File) {
@@ -78,18 +84,18 @@ func deadlineReceives(pass *analysis.Pass) map[*ast.UnaryExpr]bool {
 	return scan.receives
 }
 
-func (scan deadlineScan) fork() *deadlineScan {
-	scan.channels = maps.Clone(scan.channels)
+func (scan pollingScan) fork() *pollingScan {
+	scan.tracked = maps.Clone(scan.tracked)
 	return &scan
 }
 
-func (scan deadlineScan) withTarget(label types.Object, isLoop bool) *deadlineScan {
+func (scan pollingScan) withTarget(label types.Object, isLoop bool) *pollingScan {
 	branch := scan.fork()
 	branch.target = &branchTarget{label: label, isLoop: isLoop, parent: scan.target}
 	return branch
 }
 
-func mergeDeadlines(dst, src map[types.Object]bool) map[types.Object]bool {
+func mergeTracked(dst, src map[types.Object]bool) map[types.Object]bool {
 	if dst == nil {
 		return maps.Clone(src)
 	}
@@ -97,15 +103,15 @@ func mergeDeadlines(dst, src map[types.Object]bool) map[types.Object]bool {
 	return dst
 }
 
-func (scan *deadlineScan) record(root ast.Node) {
+func (scan *pollingScan) record(root ast.Node) {
 	if root == nil {
 		return
 	}
 	ast.Inspect(root, scan.visit)
 }
 
-func (scan *deadlineScan) visit(node ast.Node) bool {
-	if scan.channels == nil {
+func (scan *pollingScan) visit(node ast.Node) bool {
+	if scan.tracked == nil {
 		return false
 	}
 	var label types.Object
@@ -124,7 +130,7 @@ func (scan *deadlineScan) visit(node ast.Node) bool {
 		other := scan.fork()
 		scan.record(expr.Body)
 		other.record(expr.Else)
-		scan.channels = mergeDeadlines(scan.channels, other.channels)
+		scan.tracked = mergeTracked(scan.tracked, other.tracked)
 	case *ast.SwitchStmt:
 		scan.record(expr.Init)
 		scan.record(expr.Tag)
@@ -139,12 +145,12 @@ func (scan *deadlineScan) visit(node ast.Node) bool {
 		scan.record(expr.Init)
 		condition := scan.info.Types[expr.Cond].Value
 		maySkip := expr.Cond != nil && (condition == nil || !constant.BoolVal(condition))
-		scan.recordLoop(label, maySkip, expr.Body, expr.Post, func(iteration *deadlineScan) {
+		scan.recordLoop(label, maySkip, expr.Body, expr.Post, func(iteration *pollingScan) {
 			iteration.record(expr.Cond)
 		})
 	case *ast.RangeStmt:
 		scan.record(expr.X)
-		scan.recordLoop(label, scan.rangeMayBeEmpty(expr.X), expr.Body, nil, func(iteration *deadlineScan) {
+		scan.recordLoop(label, scan.rangeMayBeEmpty(expr.X), expr.Body, nil, func(iteration *pollingScan) {
 			iteration.recordRangeAssignment(expr)
 		})
 	case *ast.BranchStmt:
@@ -160,7 +166,7 @@ func (scan *deadlineScan) visit(node ast.Node) bool {
 			scan.store(name, values[i])
 		}
 	case *ast.UnaryExpr:
-		if expr.Op == token.ARROW && afterDeadline(scan.info, expr.X, scan.channels) {
+		if scan.receives != nil && expr.Op == token.ARROW && afterDeadline(scan.info, expr.X, scan.tracked) {
 			scan.receives[expr] = true
 		}
 		return true
@@ -170,7 +176,7 @@ func (scan *deadlineScan) visit(node ast.Node) bool {
 	return false
 }
 
-func (scan *deadlineScan) recordBranch(stmt *ast.BranchStmt) {
+func (scan *pollingScan) recordBranch(stmt *ast.BranchStmt) {
 	label := scan.info.Uses[stmt.Label]
 	continuing := stmt.Tok == token.CONTINUE
 	for target := scan.target; target != nil; target = target.parent {
@@ -179,30 +185,30 @@ func (scan *deadlineScan) recordBranch(stmt *ast.BranchStmt) {
 			continue
 		}
 		if continuing {
-			target.continues = mergeDeadlines(target.continues, scan.channels)
+			target.continues = mergeTracked(target.continues, scan.tracked)
 		} else {
-			target.breaks = mergeDeadlines(target.breaks, scan.channels)
+			target.breaks = mergeTracked(target.breaks, scan.tracked)
 		}
-		scan.channels = nil
+		scan.tracked = nil
 		return
 	}
 }
 
-func (scan *deadlineScan) recordSelect(body *ast.BlockStmt, label types.Object) {
+func (scan *pollingScan) recordSelect(body *ast.BlockStmt, label types.Object) {
 	entry := scan.withTarget(label, false)
-	scan.channels = nil
+	scan.tracked = nil
 	// Each clause starts from the same state, and only the selected clause assigns values.
 	for _, stmt := range body.List {
 		branch := entry.fork()
 		branch.record(stmt)
-		scan.channels = mergeDeadlines(scan.channels, branch.channels)
+		scan.tracked = mergeTracked(scan.tracked, branch.tracked)
 	}
-	scan.channels = mergeDeadlines(scan.channels, entry.target.breaks)
+	scan.tracked = mergeTracked(scan.tracked, entry.target.breaks)
 }
 
-func (scan *deadlineScan) recordSwitch(body *ast.BlockStmt, label types.Object) {
+func (scan *pollingScan) recordSwitch(body *ast.BlockStmt, label types.Object) {
 	entry := scan.withTarget(label, false)
-	scan.channels = nil
+	scan.tracked = nil
 	hasDefault := false
 	var fallingThrough map[types.Object]bool
 	for _, stmt := range body.List {
@@ -213,23 +219,23 @@ func (scan *deadlineScan) recordSwitch(body *ast.BlockStmt, label types.Object) 
 			branch.record(expr)
 		}
 		// Fallthrough enters the case body without testing the case expressions.
-		maps.Copy(branch.channels, fallingThrough)
+		maps.Copy(branch.tracked, fallingThrough)
 		fallsThrough := false
 		for _, stmt := range clause.Body {
 			branch.record(stmt)
 			fallsThrough = fallsThrough || isFallthrough(stmt)
 		}
 		if fallsThrough {
-			fallingThrough = branch.channels
+			fallingThrough = branch.tracked
 			continue
 		}
 		fallingThrough = nil
-		scan.channels = mergeDeadlines(scan.channels, branch.channels)
+		scan.tracked = mergeTracked(scan.tracked, branch.tracked)
 	}
 	if !hasDefault {
-		scan.channels = mergeDeadlines(scan.channels, entry.channels)
+		scan.tracked = mergeTracked(scan.tracked, entry.tracked)
 	}
-	scan.channels = mergeDeadlines(scan.channels, entry.target.breaks)
+	scan.tracked = mergeTracked(scan.tracked, entry.target.breaks)
 }
 
 func isFallthrough(stmt ast.Stmt) bool {
@@ -240,7 +246,7 @@ func isFallthrough(stmt ast.Stmt) bool {
 	return ok && branch.Tok == token.FALLTHROUGH
 }
 
-func (scan deadlineScan) rangeMayBeEmpty(expr ast.Expr) bool {
+func (scan pollingScan) rangeMayBeEmpty(expr ast.Expr) bool {
 	if value := scan.info.Types[expr].Value; value != nil {
 		switch value.Kind() {
 		case constant.Int:
@@ -259,32 +265,32 @@ func (scan deadlineScan) rangeMayBeEmpty(expr ast.Expr) bool {
 	return true
 }
 
-func (scan *deadlineScan) recordLoop(label types.Object, maySkip bool, body *ast.BlockStmt, post ast.Stmt, beforeBody func(*deadlineScan)) {
+func (scan *pollingScan) recordLoop(label types.Object, maySkip bool, body *ast.BlockStmt, post ast.Stmt, beforeBody func(*pollingScan)) {
 	entry := scan.withTarget(label, true)
 	for {
 		iteration := entry.fork()
 		beforeBody(iteration)
 		iteration.record(body)
 		// A continue bypasses the rest of the body and still runs the post statement.
-		iteration.channels = mergeDeadlines(iteration.channels, entry.target.continues)
+		iteration.tracked = mergeTracked(iteration.tracked, entry.target.continues)
 		iteration.record(post)
-		// A deadline assigned on one iteration can reach a receive on the next.
-		previous := len(entry.channels)
-		maps.Copy(entry.channels, iteration.channels)
-		if len(entry.channels) == previous {
-			scan.channels = iteration.channels
+		// A value assigned on one iteration can be used on the next.
+		previous := len(entry.tracked)
+		maps.Copy(entry.tracked, iteration.tracked)
+		if len(entry.tracked) == previous {
+			scan.tracked = iteration.tracked
 			if maySkip {
-				// The loop can leave incoming deadlines untouched by skipping its body.
-				scan.channels = mergeDeadlines(scan.channels, entry.channels)
+				// The loop can leave incoming values untouched by skipping its body.
+				scan.tracked = mergeTracked(scan.tracked, entry.tracked)
 			}
 			// Break paths bypass the remaining body and post statement.
-			scan.channels = mergeDeadlines(scan.channels, entry.target.breaks)
+			scan.tracked = mergeTracked(scan.tracked, entry.target.breaks)
 			return
 		}
 	}
 }
 
-func (scan deadlineScan) recordRangeAssignment(stmt *ast.RangeStmt) {
+func (scan pollingScan) recordRangeAssignment(stmt *ast.RangeStmt) {
 	targets := [...]ast.Expr{stmt.Key, stmt.Value}
 	for _, target := range targets {
 		scan.record(target)
@@ -297,7 +303,7 @@ func (scan deadlineScan) recordRangeAssignment(stmt *ast.RangeStmt) {
 	}
 }
 
-func (scan deadlineScan) recordAssignment(stmt *ast.AssignStmt) {
+func (scan pollingScan) recordAssignment(stmt *ast.AssignStmt) {
 	for _, lhs := range stmt.Lhs {
 		scan.record(lhs)
 	}
@@ -310,24 +316,54 @@ func (scan deadlineScan) recordAssignment(stmt *ast.AssignStmt) {
 }
 
 // Evaluate the right-hand sides before replacing any of the assigned values.
-func (scan deadlineScan) values(exprs []ast.Expr, count int) []bool {
+func (scan pollingScan) values(exprs []ast.Expr, count int) []bool {
 	values := make([]bool, count)
 	for i, expr := range exprs {
 		scan.record(expr)
 		if len(exprs) == count {
-			values[i] = afterDeadline(scan.info, expr, scan.channels)
+			values[i] = scan.dependsOn(expr, scan.tracked)
 		}
 	}
 	return values
 }
 
-func (scan deadlineScan) store(name *ast.Ident, deadline bool) {
+func (scan pollingScan) store(name *ast.Ident, tracked bool) {
 	object := scan.info.ObjectOf(name)
-	if deadline {
-		scan.channels[object] = true
+	if tracked {
+		scan.tracked[object] = true
 	} else {
-		delete(scan.channels, object)
+		delete(scan.tracked, object)
 	}
+}
+
+func clockFeedsCondition(info *types.Info, loop *ast.ForStmt, parent ast.Node) bool {
+	if loop.Cond == nil {
+		return false
+	}
+	target := &branchTarget{isLoop: true}
+	if labeled, ok := parent.(*ast.LabeledStmt); ok {
+		target.label = info.Defs[labeled.Label]
+	}
+	// Only samples refreshed on the way to the next condition count.
+	scan := pollingScan{
+		info:    info,
+		tracked: make(map[types.Object]bool),
+		dependsOn: func(expr ast.Expr, tracked map[types.Object]bool) bool {
+			return readsClock(info, expr) || usesTrackedValue(info, expr, tracked)
+		},
+		target: target,
+	}
+	scan.record(loop.Body)
+	scan.tracked = mergeTracked(scan.tracked, target.continues)
+	scan.record(loop.Post)
+	return usesTrackedValue(info, loop.Cond, scan.tracked)
+}
+
+func usesTrackedValue(info *types.Info, expr ast.Expr, tracked map[types.Object]bool) bool {
+	return contains(expr, func(node ast.Node) bool {
+		name, ok := node.(*ast.Ident)
+		return ok && tracked[info.Uses[name]]
+	})
 }
 
 func readsClock(info *types.Info, condition ast.Expr) bool {

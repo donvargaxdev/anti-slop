@@ -192,3 +192,43 @@ func TestRetryNonTestCallback(t *testing.T) {
 	retry(func(value *int) { *value = 1 })
 	retry(func(value int) int { return value + 1 })
 }
+
+func TestSkipAfterEverySwitchCaseClearsFailure(t *testing.T) {
+	failed := t.Failed()
+	switch testing.Short() {
+	default:
+		failed = false
+	case true:
+		failed = available()
+	}
+	if failed {
+		t.Skip("optional test")
+	}
+}
+
+func TestSkipInIndependentSwitchCase(t *testing.T) {
+	var failed bool
+	switch {
+	case testing.Short():
+		failed = t.Failed()
+	default:
+		if failed {
+			t.Skip("optional test")
+		}
+	}
+	_ = failed
+}
+
+func TestSkipAfterFallthroughClearsFailure(t *testing.T) {
+	var failed bool
+	switch {
+	case testing.Short():
+		failed = t.Failed()
+		fallthrough
+	default:
+		failed = false
+	}
+	if failed {
+		t.Skip("optional test")
+	}
+}
