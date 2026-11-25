@@ -93,6 +93,14 @@ Feature: Test reliability
           }
           t.Skip("failed")
       }
+
+      func TestSkipAfterSwitchGuard(t *testing.T) {
+          switch {
+          case !t.Failed():
+              return
+          }
+          t.Skip("failed")
+      }
       """
     When anti-slop runs with "tests ./..."
     Then it exits with code 0
@@ -108,6 +116,7 @@ Feature: Test reliability
       p_test.go:61:5: tests: polling against the wall clock
       p_test.go:63:5: tests: polling against the wall clock
       p_test.go:71:5: tests: skipping after a failure
+      p_test.go:79:5: tests: skipping after a failure
       """
     And its error output is empty
 

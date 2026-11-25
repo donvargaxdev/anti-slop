@@ -701,3 +701,51 @@ func TestSkipAfterBothPathsRequireFailure(t *test.T) {
 	}
 	t.Skip("failed") // want "skipping after a failure"
 }
+
+func TestSkipAfterSwitchMiss(t *test.T) {
+	switch {
+	case !t.Failed():
+		return
+	}
+	t.Skip("failed") // want "skipping after a failure"
+}
+
+func TestSkipAfterSwitchDefault(t *test.T) {
+	switch {
+	case !t.Failed():
+		return
+	default:
+		t.Log("failed")
+	}
+	t.SkipNow() // want "skipping after a failure"
+}
+
+func TestSkipAfterGuardedSwitchBreak(t *test.T) {
+failed:
+	switch {
+	case t.Failed():
+		switch {
+		default:
+			break failed
+		}
+		return
+	default:
+		return
+	}
+	t.Skip("failed") // want "skipping after a failure"
+}
+
+func TestSkipAfterGuardedFallthrough(t *test.T) {
+	switch {
+	case test.Short():
+		if !t.Failed() {
+			return
+		}
+		fallthrough
+	case t.Failed():
+		t.Log("failed")
+	default:
+		return
+	}
+	t.Skip("failed") // want "skipping after a failure"
+}

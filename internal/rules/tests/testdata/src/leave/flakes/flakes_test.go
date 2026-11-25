@@ -80,20 +80,24 @@ func TestStopOnCopiedShortMode(t *testing.T) {
 	}
 }
 
-func TestSkipInUnrelatedErrorSwitchCase(t *testing.T) {
+func TestSkipOnNilSwitchError(t *testing.T) {
 	switch err := check(); err {
 	case nil:
 		t.Skip("optional")
 	default:
 		t.Log(err)
 	}
+}
 
+func TestSkipInUnrelatedErrorSwitchCase(t *testing.T) {
 	switch err := check(); err {
 	case os.ErrInvalid:
 	default:
 		t.Skip("optional")
 	}
+}
 
+func TestSkipAfterNilSwitchErrorFallsThrough(t *testing.T) {
 	switch err := check(); err {
 	case nil:
 		fallthrough
@@ -641,6 +645,24 @@ func TestSkipAfterOptionalFailurePath(t *testing.T) {
 func TestSkipAfterOptionalSuccessPath(t *testing.T) {
 	if !t.Failed() {
 		t.Log("passed")
+	}
+	t.Skip("optional")
+}
+
+func TestSkipAfterSwitchWithIndependentBreak(t *testing.T) {
+	switch {
+	case testing.Short():
+		break
+	case !t.Failed():
+		return
+	}
+	t.Skip("optional")
+}
+
+func TestSkipAfterSwitchWithIndependentMiss(t *testing.T) {
+	switch {
+	case t.Failed():
+		t.Log("failed")
 	}
 	t.Skip("optional")
 }

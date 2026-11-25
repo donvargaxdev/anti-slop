@@ -19,12 +19,16 @@ var Flakes = &analysis.Analyzer{
 
 type flakeChecks struct {
 	info *types.Info
+	flakeFlow
+	target      *branchTarget[flakeFlow]
+	retryBody   *ast.BlockStmt
+	successCase bool
+}
+
+type flakeFlow struct {
 	// A nil map marks a path that jumped away.
 	outcomes     map[types.Object]outcomePolarity
-	target       *branchTarget[map[types.Object]outcomePolarity]
 	failureGuard bool
-	retryBody    *ast.BlockStmt
-	successCase  bool
 }
 
 type outcomePolarity uint8
@@ -37,7 +41,7 @@ const (
 
 func runFlakes(pass *analysis.Pass) (any, error) {
 	info := pass.TypesInfo
-	checks := flakeChecks{info: info, outcomes: make(map[types.Object]outcomePolarity)}
+	checks := flakeChecks{info: info, flakeFlow: flakeFlow{outcomes: make(map[types.Object]outcomePolarity)}}
 	reported := make(map[token.Pos]bool)
 	reportOnce := func(node ast.Node, reason string) {
 		if !reported[node.Pos()] {
@@ -100,10 +104,7 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 				otherwise.failureGuard = c.failureGuard || c.failureCondition(stmt.Cond, false, nil)
 				otherwise.constrainOutcome(stmt.Cond, failsWhenFalse)
 				otherwise.walk(stmt.Else, visit)
-				// Every path that reaches the next statement must require failure.
-				c.failureGuard = (then.outcomes == nil || then.failureGuard) &&
-					(otherwise.outcomes == nil || otherwise.failureGuard)
-				c.outcomes = mergeOutcomes(otherwise.outcomes, then.outcomes)
+				c.flakeFlow = mergeFlakeFlows(otherwise.flakeFlow, then.flakeFlow)
 			}
 			return false
 		}
@@ -195,7 +196,7 @@ func (c flakeChecks) fork() *flakeChecks {
 
 func (c flakeChecks) withTarget(label types.Object, isLoop bool) *flakeChecks {
 	branch := c.fork()
-	branch.target = &branchTarget[map[types.Object]outcomePolarity]{label: label, isLoop: isLoop, parent: c.target}
+	branch.target = &branchTarget[flakeFlow]{label: label, isLoop: isLoop, parent: c.target}
 	return branch
 }
 
@@ -205,9 +206,9 @@ func (c *flakeChecks) recordBranch(stmt *ast.BranchStmt) {
 		return
 	}
 	if stmt.Tok == token.CONTINUE {
-		target.continues = mergeOutcomes(target.continues, c.outcomes)
+		target.continues = mergeFlakeFlows(target.continues, c.flakeFlow)
 	} else {
-		target.breaks = mergeOutcomes(target.breaks, c.outcomes)
+		target.breaks = mergeFlakeFlows(target.breaks, c.flakeFlow)
 	}
 	c.outcomes = nil
 }
@@ -222,31 +223,31 @@ func (c *flakeChecks) walkLoop(label types.Object, body *ast.BlockStmt, post ast
 		beforeBody(iteration)
 		iteration.walk(body, visit)
 		// Continue runs the post statement. Break reaches the next statement directly.
-		iteration.outcomes = mergeOutcomes(iteration.outcomes, entry.target.continues)
+		iteration.flakeFlow = mergeFlakeFlows(iteration.flakeFlow, entry.target.continues)
 		iteration.walk(post, visit)
 		// The next iteration can also start with values from the first entry.
-		next := mergeOutcomes(maps.Clone(entry.outcomes), iteration.outcomes)
-		if count == bounds.maxIterations || maps.Equal(entry.outcomes, next) {
-			exits := mergeOutcomes(iteration.outcomes, entry.target.breaks)
+		next := mergeFlakeFlows(entry.fork().flakeFlow, iteration.flakeFlow)
+		if count == bounds.maxIterations || maps.Equal(entry.outcomes, next.outcomes) {
+			exits := mergeFlakeFlows(iteration.flakeFlow, entry.target.breaks)
 			if bounds.maySkip {
-				exits = mergeOutcomes(exits, c.outcomes)
+				exits = mergeFlakeFlows(exits, c.flakeFlow)
 			}
-			c.outcomes = exits
+			c.flakeFlow = exits
 			return
 		}
-		entry.outcomes = next
+		entry.flakeFlow = next
 	}
 }
 
 func (c *flakeChecks) walkCommunications(body *ast.BlockStmt, label types.Object, visit func(flakeChecks, ast.Node, ast.Node) bool) {
 	entry := c.withTarget(label, false)
-	c.outcomes = nil
+	var exits flakeFlow
 	for _, clause := range body.List {
 		branch := entry.fork()
 		branch.walk(clause, visit)
-		c.outcomes = mergeOutcomes(c.outcomes, branch.outcomes)
+		exits = mergeFlakeFlows(exits, branch.flakeFlow)
 	}
-	c.outcomes = mergeOutcomes(c.outcomes, entry.target.breaks)
+	c.flakeFlow = mergeFlakeFlows(exits, entry.target.breaks)
 }
 
 type switchPath struct {
@@ -258,8 +259,7 @@ func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, tag ast
 	entry := c.withTarget(label, false)
 	matches, unmatched := entry.matchSwitchCases(body, tag, visit)
 	// Default is selected after all expressions miss, but fallthrough follows body order.
-	c.outcomes = nil
-	var fallingThrough map[types.Object]outcomePolarity
+	var exits, fallingThrough flakeFlow
 	fallthroughGuard := false
 	hasDefault := false
 	for _, stmt := range body.List {
@@ -269,30 +269,34 @@ func (c *flakeChecks) walkCases(body *ast.BlockStmt, label types.Object, tag ast
 			hasDefault = true
 			path = unmatched
 		}
-		// Fallthrough enters the next body without evaluating the case expressions.
-		guarded := path.guarded && (fallingThrough == nil || fallthroughGuard)
 		branch := *entry
-		branch.outcomes = mergeOutcomes(path.outcomes, fallingThrough)
+		branch.outcomes = path.outcomes
+		guardedOnSuccess := path.guarded && (fallingThrough.outcomes == nil || fallthroughGuard)
 		if c.retryBody == nil {
-			branch.failureGuard = entry.failureGuard || guarded
+			branch.failureGuard = entry.failureGuard || path.guarded
 		} else {
-			branch.successCase = entry.successCase || guarded
+			branch.successCase = entry.successCase || guardedOnSuccess
 		}
+		// Fallthrough enters the next body without evaluating the case expressions.
+		branch.flakeFlow = mergeFlakeFlows(branch.flakeFlow, fallingThrough)
 		for _, stmt := range clause.Body {
 			branch.walk(stmt, visit)
 		}
 		if len(clause.Body) > 0 && isFallthrough(clause.Body[len(clause.Body)-1]) {
-			fallingThrough = branch.outcomes
-			fallthroughGuard = guarded
+			fallingThrough = branch.flakeFlow
+			fallthroughGuard = guardedOnSuccess
 		} else {
-			fallingThrough = nil
-			c.outcomes = mergeOutcomes(c.outcomes, branch.outcomes)
+			fallingThrough = flakeFlow{}
+			exits = mergeFlakeFlows(exits, branch.flakeFlow)
 		}
 	}
 	if !hasDefault {
-		c.outcomes = mergeOutcomes(c.outcomes, unmatched.outcomes)
+		exits = mergeFlakeFlows(exits, flakeFlow{
+			outcomes:     unmatched.outcomes,
+			failureGuard: entry.failureGuard || (c.retryBody == nil && unmatched.guarded),
+		})
 	}
-	c.outcomes = mergeOutcomes(c.outcomes, entry.target.breaks)
+	c.flakeFlow = mergeFlakeFlows(exits, entry.target.breaks)
 }
 
 func (c *flakeChecks) matchSwitchCases(body *ast.BlockStmt, tag ast.Expr, visit func(flakeChecks, ast.Node, ast.Node) bool) (map[*ast.CaseClause]switchPath, switchPath) {
@@ -353,6 +357,12 @@ func (c flakeChecks) switchCondition(tag, expr ast.Expr) (ast.Expr, bool) {
 		return tag, constant.BoolVal(value)
 	}
 	return nil, false
+}
+
+func mergeFlakeFlows(dst, src flakeFlow) flakeFlow {
+	// Every path that reaches the join must require failure.
+	guarded := (dst.outcomes == nil || dst.failureGuard) && (src.outcomes == nil || src.failureGuard)
+	return flakeFlow{outcomes: mergeOutcomes(dst.outcomes, src.outcomes), failureGuard: guarded}
 }
 
 func mergeOutcomes(dst, src map[types.Object]outcomePolarity) map[types.Object]outcomePolarity {
