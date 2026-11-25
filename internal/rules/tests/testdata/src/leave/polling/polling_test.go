@@ -595,6 +595,45 @@ func TestImmediateCallEvaluatesArgumentsFirst(t *testing.T) {
 	}())
 }
 
+func TestImmediateCallOnlyReceivesReadinessArgument(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	for range 3 {
+		func(first, _ <-chan time.Time) { <-first }(ready, time.After(time.Millisecond))
+	}
+}
+
+func TestImmediateCallReplacesDeadlineArgument(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	for range 3 {
+		func(ch <-chan time.Time) {
+			ch = ready
+			<-ch
+		}(time.After(time.Millisecond))
+	}
+}
+
+func TestImmediateCallDoesNotRunWhenArgumentEndsTest(t *testing.T) {
+	for range 3 {
+		func(ch <-chan time.Time, _ bool) { <-ch }(time.After(time.Millisecond), func() bool {
+			t.SkipNow()
+			return false
+		}())
+	}
+}
+
+func TestImmediateCallDoesNotTreatTupleAsOneClockValue(t *testing.T) {
+	values := func(now time.Time) (bool, time.Time) { return testing.Short(), now }
+	for range 3 {
+		func(skip bool, _ ...time.Time) {
+			if skip {
+				t.SkipNow()
+			}
+		}(values(time.Now()))
+	}
+}
+
 func TestImmediateCallRunsAfterTrueAnd(t *testing.T) {
 	ready := make(chan time.Time)
 	close(ready)

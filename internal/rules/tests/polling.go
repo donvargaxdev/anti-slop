@@ -151,7 +151,7 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 	}
 	switch expr := node.(type) {
 	case *ast.FuncLit:
-		scan.recordLiteral(expr, nil)
+		scan.fork().recordLiteral(expr, nil)
 	case *ast.CallExpr:
 		literal := immediateLiteral(expr, parent)
 		if literal == nil {
@@ -236,29 +236,45 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 }
 
 func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.FuncLit) {
-	for _, arg := range call.Args {
-		scan.record(arg)
+	arguments := scan.values(call.Args, len(call.Args))
+	if scan.tracked == nil {
+		return
+	}
+
+	body := scan.fork()
+	signature := scan.info.TypeOf(literal).(*types.Signature)
+	params := signature.Params()
+	fixed := params.Len()
+	if signature.Variadic() {
+		fixed--
+	}
+	for i := range min(fixed, len(arguments)) {
+		// A tuple argument has no separately tracked value for each result.
+		if _, tuple := scan.info.TypeOf(call.Args[i]).(*types.Tuple); arguments[i] && !tuple {
+			body.tracked[params.At(i)] = true
+		}
 	}
 	var returns pollingFlow
-	fallthroughFlow := scan.recordLiteral(literal, &returns)
+	body.recordLiteral(literal, &returns)
 	// Explicit returns and fallthrough both resume the caller.
-	resumed := mergePollingFlows(fallthroughFlow, returns)
+	resumed := mergePollingFlows(body.pollingFlow, returns)
 	if resumed.tracked == nil {
 		scan.recordExit()
 		scan.stopPath()
 		return
 	}
+	for i := range fixed {
+		delete(resumed.tracked, params.At(i))
+	}
 	scan.tracked = resumed.tracked
 }
 
-func (scan *pollingScan) recordLiteral(literal *ast.FuncLit, returns *pollingFlow) pollingFlow {
-	body := scan.fork()
-	body.target = nil
-	body.continuations = nil
-	body.bypassed = false
-	body.returns = returns
-	body.record(literal.Body)
-	return body.pollingFlow
+func (scan *pollingScan) recordLiteral(literal *ast.FuncLit, returns *pollingFlow) {
+	scan.target = nil
+	scan.continuations = nil
+	scan.bypassed = false
+	scan.returns = returns
+	scan.record(literal.Body)
 }
 
 func (scan *pollingScan) recordShortCircuit(expr *ast.BinaryExpr) {

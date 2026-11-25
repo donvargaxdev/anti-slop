@@ -654,6 +654,34 @@ func TestDeadlineInImmediateCall(t *testing.T) {
 	}
 }
 
+func TestDeadlineArgumentInImmediateCall(t *testing.T) {
+	for range 3 { // want "polling against the wall clock"
+		func(ch <-chan Time) { <-ch }(After(Millisecond))
+	}
+}
+
+func TestDeadlineArgumentInNestedImmediateCall(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	for range 3 { // want "polling against the wall clock"
+		(func(first, second <-chan Time, _ ...bool) {
+			func(ch <-chan Time) { <-ch }(second)
+		})(ready, After(Millisecond), true)
+	}
+}
+
+func TestImmediateCallCapturesArgumentBeforeLaterArgumentRuns(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	for range 3 { // want "polling against the wall clock"
+		deadline := After(Millisecond)
+		func(ch <-chan Time, _ bool) { <-ch }(deadline, func() bool {
+			deadline = ready
+			return true
+		}())
+	}
+}
+
 func TestDeadlineInImmediateCondition(t *testing.T) {
 	for func() bool { return (<-After(Millisecond)).IsZero() }() { // want "polling against the wall clock"
 	}
