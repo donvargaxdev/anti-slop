@@ -7,6 +7,56 @@ import (
 
 func check() error { return errors.New("failure") }
 
+func TestRetryUntilSwitchCaseSucceeds(t *test.T) {
+	for range 3 { // want "retrying a check or test body"
+		switch {
+		case t.Run("attempt", func(t *test.T) {}):
+			return
+		}
+	}
+}
+
+func TestRetryUntilSwitchBreaksLoop(t *test.T) {
+attempts:
+	for range 3 { // want "retrying a check or test body"
+		switch ok := t.Run("attempt", func(t *test.T) {}); ok {
+		case true:
+			break attempts
+		}
+	}
+}
+
+func TestRetryUntilSwitchDefaultSucceeds(t *test.T) {
+	for range 3 { // want "retrying a check or test body"
+		switch {
+		case !t.Run("attempt", func(t *test.T) {}):
+			t.Log("retrying")
+		default:
+			return
+		}
+	}
+}
+
+func retryUntilSwitchHasNoError() {
+	for range 3 { // want "retrying a check or test body"
+		switch err := check(); err {
+		case nil:
+			return
+		}
+	}
+}
+
+func TestRetryUntilSwitchSuccessFallsThrough(t *test.T) {
+	for range 3 { // want "retrying a check or test body"
+		switch false {
+		case !t.Run("attempt", func(t *test.T) {}):
+			fallthrough
+		case t.Failed():
+			return
+		}
+	}
+}
+
 func TestRetryCheck(t *test.T) {
 	for attempt := 0; attempt < 3; attempt++ { // want "retrying a check or test body"
 		if err := check(); err == nil {

@@ -5,6 +5,29 @@ import (
 	"time"
 )
 
+func TestAdjustedFixedDuration(t *testing.T) {
+	start := time.Now()
+	for {
+		elapsed := time.Since(start)
+		elapsed = time.Second
+		elapsed += time.Millisecond
+		if elapsed > time.Second {
+			t.Fatal("timeout")
+		}
+	}
+}
+
+func TestShortDeclarationReplacesClockValue(t *testing.T) {
+	start := time.Now()
+	for {
+		elapsed := time.Since(start)
+		elapsed, limit := time.Second, 2*time.Second
+		if elapsed > limit {
+			t.Fatal("timeout")
+		}
+	}
+}
+
 type fakeClock struct{}
 
 func (fakeClock) Now() bool { return false }

@@ -7,6 +7,28 @@ import (
 
 var packageDeadline = After(Second)
 
+func TestAdjustedElapsedTime(t *testing.T) {
+	start := Now()
+	for { // want "polling against the wall clock"
+		elapsed := Since(start)
+		elapsed += Millisecond
+		if elapsed > Second {
+			t.Fatal("timeout")
+		}
+	}
+}
+
+func TestClockOnRightOfCompoundAssignment(t *testing.T) {
+	start := Now()
+	for { // want "polling against the wall clock"
+		elapsed := Millisecond
+		elapsed += Since(start)
+		if elapsed > Second {
+			t.Fatal("timeout")
+		}
+	}
+}
+
 func pollPackageDeadline() {
 	for range 3 { // want "polling against the wall clock"
 		<-packageDeadline

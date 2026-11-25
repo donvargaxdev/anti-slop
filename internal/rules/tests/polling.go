@@ -319,7 +319,8 @@ func (scan pollingScan) recordAssignment(stmt *ast.AssignStmt) {
 	values := scan.values(stmt.Rhs, len(stmt.Lhs))
 	for i, lhs := range stmt.Lhs {
 		if name, ok := ast.Unparen(lhs).(*ast.Ident); ok {
-			scan.store(name, values[i])
+			compound := stmt.Tok != token.ASSIGN && stmt.Tok != token.DEFINE
+			scan.store(name, values[i] || compound && scan.tracked[scan.info.ObjectOf(name)])
 		}
 	}
 }

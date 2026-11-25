@@ -430,6 +430,51 @@ func TestComparedSuccess(t *testing.T) {
 	}
 }
 
+func TestSwitchBreakKeepsLoopRunning(t *testing.T) {
+	for range 3 {
+	local:
+		switch {
+		case t.Run("attempt", func(t *testing.T) {}):
+			break local
+		}
+		switch {
+		case t.Run("another attempt", func(t *testing.T) {}):
+			if testing.Verbose() {
+				break
+			}
+		}
+	}
+}
+
+func TestSwitchRetainsIndependentExit(t *testing.T) {
+	for range 3 {
+		switch {
+		case testing.Short(), t.Run("attempt", func(t *testing.T) {}):
+			return
+		}
+	}
+}
+
+func TestSwitchSuccessCanContinue(t *testing.T) {
+	for range 3 {
+		switch {
+		case t.Run("attempt", func(t *testing.T) {}):
+			continue
+		}
+	}
+}
+
+func TestSwitchFallsThroughFromIndependentCase(t *testing.T) {
+	for range 3 {
+		switch {
+		case testing.Short():
+			fallthrough
+		case t.Run("attempt", func(t *testing.T) {}):
+			return
+		}
+	}
+}
+
 func TestComparedFailureLeavesNoFailedOutcome(t *testing.T) {
 	failed := t.Failed()
 	if false != failed {
