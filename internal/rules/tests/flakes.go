@@ -252,6 +252,12 @@ func (c *flakeChecks) walkShortCircuit(expr *ast.BinaryExpr, visit func(flakeChe
 		return
 	}
 	right := c.fork()
+	evaluate, skip := failsWhenTrue, failsWhenFalse
+	if expr.Op == token.LOR {
+		evaluate, skip = skip, evaluate
+	}
+	right.constrainOutcome(expr.X, evaluate)
+	c.constrainOutcome(expr.X, skip)
 	right.walk(expr.Y, visit)
 	c.flakeFlow = mergeFlakeFlows(c.flakeFlow, right.flakeFlow)
 }

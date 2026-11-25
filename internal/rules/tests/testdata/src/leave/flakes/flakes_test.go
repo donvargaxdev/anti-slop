@@ -841,6 +841,38 @@ func TestImmediateCallRunsAfterTrueAnd(t *testing.T) {
 	}
 }
 
+func TestAndClearsFailureWhenNeeded(t *testing.T) {
+	failed := t.Failed()
+	_ = failed && func() bool {
+		failed = false
+		return true
+	}()
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestOrClearsFailureWhenNeeded(t *testing.T) {
+	passed := t.Run("setup", func(t *testing.T) {})
+	_ = passed || func() bool {
+		passed = true
+		return true
+	}()
+	if !passed {
+		t.Skip("optional")
+	}
+}
+
+func TestOrEvaluatesRightOnlyOnSuccess(t *testing.T) {
+	failed := t.Failed()
+	_ = failed || func() bool {
+		if failed {
+			t.Skip("optional")
+		}
+		return false
+	}()
+}
+
 func TestEnterLoopOnSuccess(t *testing.T) {
 	passed := t.Run("setup", func(t *testing.T) {})
 	for passed {
