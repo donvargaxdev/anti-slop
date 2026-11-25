@@ -245,6 +245,19 @@ func TestErrorsIsWithKnownNilError(t *testing.T) {
 	}
 }
 
+func TestClassificationOfKnownNilError(t *testing.T) {
+	var err error
+	if errors.Is(err, os.ErrInvalid) {
+		t.Skip("optional")
+	}
+	err = check()
+	err = nil
+	var pathError *os.PathError
+	if errors.As(err, &pathError) {
+		t.Skip("optional")
+	}
+}
+
 type concreteError struct{}
 
 func (*concreteError) Error() string { return "failed" }

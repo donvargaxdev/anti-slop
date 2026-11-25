@@ -146,8 +146,12 @@ func (c flakeChecks) checkCondition(condition ast.Expr, truth, wantFailure bool,
 			// A concrete error value is boxed into a non-nil interface, even if the value is nil.
 			return !failure && types.IsInterface(c.info.TypeOf(value)) && c.errorComparedWithNil(value, expr.Args[1], attempt)
 		case packageCall(c.info, expr, "errors", "Is", "As"):
+			value := expr.Args[0]
+			if c.knownNilError(value) {
+				return false
+			}
 			// Classifying an error only retries a check if the error is refreshed.
-			return failure && (!c.retryHeader || attempt == nil || c.retryErrorOutcome(expr.Args[0]) != 0)
+			return failure && (!c.retryHeader || attempt == nil || c.retryErrorOutcome(value) != 0)
 		case testingMethod(c.info, expr, "Run"):
 			return !failure
 		case attempt != nil || c.retry != nil:

@@ -200,6 +200,7 @@ Feature: Test reliability
 
       import (
           "errors"
+          "io"
           "strconv"
           "testing"
           "time"
@@ -321,6 +322,14 @@ Feature: Test reliability
 
       func TestSkipAfterSuccessfulCheck(t *testing.T) {
           if err := check(); errors.Is(err, nil) {
+              t.Skip("optional")
+          }
+      }
+
+      func TestSkipAfterClearingClassifiedError(t *testing.T) {
+          err := check()
+          err = nil
+          if errors.Is(err, io.EOF) {
               t.Skip("optional")
           }
       }
