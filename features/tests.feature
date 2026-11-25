@@ -212,6 +212,16 @@ Feature: Test reliability
           }
       }
 
+      func TestHandledError(t *testing.T) {
+          err := check()
+          if err != nil {
+              err = nil
+          }
+          if err != nil {
+              t.Skip("optional")
+          }
+      }
+
       func check() error { return nil }
       """
     When anti-slop runs with "tests ./..."

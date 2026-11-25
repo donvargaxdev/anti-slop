@@ -128,6 +128,49 @@ func validate(i int) error {
 
 func check() error { return nil }
 
+func TestSkipAfterHandlingError(t *testing.T) {
+	err := check()
+	if err != nil {
+		err = nil
+	}
+	if err != nil {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipAfterReturningOnError(t *testing.T) {
+	err := check()
+	if nil != err {
+		return
+	}
+	if !(nil == err) {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipAfterCopyingClearedError(t *testing.T) {
+	var err error
+	other := err
+	switch other {
+	case nil:
+		t.Log("no error")
+	default:
+		t.Skip("optional")
+	}
+}
+
+func TestSkipAfterSwitchClearsError(t *testing.T) {
+	err := check()
+	switch err {
+	case nil:
+	default:
+		err = nil
+	}
+	if err != nil {
+		t.Skip("optional")
+	}
+}
+
 func TestLoopConditionUsesFixedFailure(t *testing.T) {
 	err := check()
 	for attempts := 0; attempts < 3 && err != nil; attempts++ {

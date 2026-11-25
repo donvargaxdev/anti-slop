@@ -7,6 +7,63 @@ import (
 
 func check() error { return errors.New("failure") }
 
+func TestSkipAfterPossiblyClearingError(t *test.T) {
+	err := check()
+	if test.Short() {
+		err = nil
+	}
+	if err != nil {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+	err = nil
+	if test.Short() {
+		err = check()
+	}
+	if err != nil {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipAfterRefreshingError(t *test.T) {
+	err := check()
+	if err != nil {
+		err = nil
+	}
+	err = check()
+	if err != nil {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipAfterUpdatingSharedError(t *test.T) {
+	var addressed error
+	updateError(&addressed)
+	if addressed != nil {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+	var captured error
+	update := func() { captured = check() }
+	update()
+	if captured != nil {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func updateError(err *error) { *err = check() }
+
+type pointerError struct{}
+
+func (*pointerError) Error() string { return "failed" }
+
+func TestSkipAfterBoxingNilPointer(t *test.T) {
+	func(ptr *pointerError) {
+		var err error = ptr
+		if err != nil {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+	}(nil)
+}
+
 func TestRetryUntilSwitchCaseSucceeds(t *test.T) {
 	for range 3 { // want "retrying a check or test body"
 		switch {

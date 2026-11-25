@@ -52,7 +52,7 @@ func (c flakeChecks) retryErrorOutcome(value ast.Expr) outcomePolarity {
 		return 0
 	}
 	if name, ok := ast.Unparen(value).(*ast.Ident); ok {
-		return c.outcomes[c.info.ObjectOf(name)]
+		return c.outcomes[c.info.ObjectOf(name)] & refreshedError
 	}
 	if c.isCheckCall(value) {
 		return refreshedError
@@ -155,11 +155,7 @@ func booleanComparison(info *types.Info, expr *ast.BinaryExpr) (ast.Expr, bool) 
 }
 
 func (c flakeChecks) errorComparedWithNil(value, other ast.Expr, attempt ast.Node) bool {
-	nilIdent, ok := ast.Unparen(other).(*ast.Ident)
-	if !ok || c.info.Uses[nilIdent] != types.Universe.Lookup("nil") {
-		return false
-	}
-	return isErrorResult(c.info.TypeOf(value)) && c.attemptResult(value, attempt)
+	return c.isNil(other) && !c.knownNilError(value) && isErrorResult(c.info.TypeOf(value)) && c.attemptResult(value, attempt)
 }
 
 func isErrorResult(typ types.Type) bool {

@@ -22,6 +22,7 @@ type flakeChecks struct {
 	target       *branchTarget[flakeFlow]
 	returns      *flakeReturns
 	callOutcomes map[*ast.CallExpr]outcomePolarity
+	sharedErrors map[types.Object]bool
 	retry        *retryScan
 	successCase  bool
 	retryHeader  bool
@@ -47,6 +48,7 @@ const (
 	failsWhenFalse
 	shortMode
 	refreshedError
+	nilError
 )
 
 func runFlakes(pass *analysis.Pass) (any, error) {
@@ -64,6 +66,7 @@ func runFlakes(pass *analysis.Pass) (any, error) {
 		}
 	}
 	visitTestFiles(pass, func(file *ast.File) {
+		checks.sharedErrors = sharedErrorVariables(info, file)
 		checks.walk(file, func(checks flakeChecks, node, parent ast.Node) bool {
 			checks.reportFinding(node, parent, reportOnce)
 			return true
@@ -218,6 +221,9 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 		case *ast.ValueSpec:
 			outcomes := c.assignmentOutcomes(stmt.Values, len(stmt.Names), visit)
 			for i, name := range stmt.Names {
+				if len(stmt.Values) == 0 {
+					outcomes[i] = nilError
+				}
 				c.storeOutcome(name, outcomes[i])
 			}
 			return false
@@ -241,7 +247,7 @@ func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit
 	}
 	for i := range min(fixed, len(outcomes)) {
 		if outcomes[i] != 0 {
-			body.outcomes[params.At(i)] = outcomes[i]
+			body.storeObjectOutcome(params.At(i), outcomes[i])
 		}
 	}
 	var returns flakeReturns
@@ -453,7 +459,11 @@ func (c *flakeChecks) constrainSwitchCase(tag, expr ast.Expr, matches bool, atte
 	condition, trueOnMatch := c.switchCondition(tag, expr)
 	if condition == nil {
 		// Matching nil proves success. Missing nil proves failure.
-		return matches == (attempt != nil) && c.errorComparedWithNil(tag, expr, attempt)
+		guarded := matches == (attempt != nil) && c.errorComparedWithNil(tag, expr, attempt)
+		if c.isNil(expr) {
+			c.constrainError(tag, matches)
+		}
+		return guarded
 	}
 	truth := matches == trueOnMatch
 	guarded := c.failureCondition(condition, truth == (attempt == nil), attempt)
@@ -494,14 +504,14 @@ func mergeOutcomes(dst, src map[types.Object]outcomePolarity) map[types.Object]o
 	if src == nil {
 		return dst
 	}
-	// The exemption applies only when every incoming path carries short mode.
+	// Definite facts must hold on every incoming path.
 	for object, polarity := range dst {
-		if polarity == shortMode && src[object] != shortMode {
+		if (polarity == shortMode || polarity == nilError) && src[object] != polarity {
 			delete(dst, object)
 		}
 	}
 	for object, polarity := range src {
-		if polarity != shortMode {
+		if polarity != shortMode && polarity != nilError {
 			dst[object] |= polarity
 		}
 	}
@@ -523,7 +533,9 @@ func (c *flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int, vis
 	for i, value := range values {
 		c.walk(value, visit)
 		if !booleanResult(c.info, value) {
-			if c.retryHeader {
+			if c.isNil(value) || c.knownNilError(value) {
+				outcomes[i] = nilError
+			} else if c.retryHeader {
 				outcomes[i] = c.retryErrorOutcome(value)
 			}
 			continue
@@ -566,7 +578,10 @@ func (c flakeChecks) isShortMode(value ast.Expr) bool {
 }
 
 // A branch testing a stored outcome can only carry its matching polarity.
-func (c flakeChecks) constrainOutcome(condition ast.Expr, possible outcomePolarity) {
+func (c *flakeChecks) constrainOutcome(condition ast.Expr, possible outcomePolarity) {
+	if c.outcomes == nil {
+		return
+	}
 	switch expr := ast.Unparen(condition).(type) {
 	case *ast.Ident:
 		polarity := c.outcomes[c.info.Uses[expr]]
@@ -583,6 +598,13 @@ func (c flakeChecks) constrainOutcome(condition ast.Expr, possible outcomePolari
 				possible ^= failsWhenTrue | failsWhenFalse
 			}
 			c.constrainOutcome(operand, possible)
+		} else if expr.Op == token.EQL || expr.Op == token.NEQ {
+			equal := (expr.Op == token.EQL) == (possible == failsWhenTrue)
+			if c.isNil(expr.Y) {
+				c.constrainError(expr.X, equal)
+			} else if c.isNil(expr.X) {
+				c.constrainError(expr.Y, equal)
+			}
 		}
 	}
 }
@@ -595,6 +617,9 @@ func (c flakeChecks) storeOutcome(name *ast.Ident, polarity outcomePolarity) {
 }
 
 func (c flakeChecks) storeObjectOutcome(object types.Object, polarity outcomePolarity) {
+	if polarity == nilError && !c.tracksNilError(object) {
+		polarity = 0
+	}
 	if polarity == 0 {
 		delete(c.outcomes, object)
 	} else {
