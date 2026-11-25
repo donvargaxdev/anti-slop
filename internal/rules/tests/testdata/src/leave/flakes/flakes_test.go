@@ -857,3 +857,21 @@ func TestOptionalSkipAfterFailureLoop(t *testing.T) {
 	}
 	t.Skip("optional")
 }
+
+func TestStopCheckingAtExpectedError(t *testing.T) {
+	expected := errors.New("expected")
+	for attempts := 0; attempts < 3 && check() != expected; attempts++ {
+		t.Log("waiting for the expected error")
+	}
+}
+
+func TestIndependentImmediateCalls(t *testing.T) {
+	for i := range 3 {
+		func() {
+			if check() == nil {
+				return
+			}
+			t.Log(i)
+		}()
+	}
+}

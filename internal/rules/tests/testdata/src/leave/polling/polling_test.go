@@ -552,3 +552,69 @@ func TestReceiveAfterSkippedBranch(t *testing.T) {
 		<-ch
 	}
 }
+
+func TestImmediateCallReplacesDeadline(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	(func() { ch = ready })()
+	for range 3 {
+		<-ch
+	}
+}
+
+func TestImmediateCallReplacesDeadlineBeforeReturn(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	result := func() bool {
+		if testing.Short() {
+			ch = ready
+			return true
+		}
+		ch = ready
+		return false
+	}()
+	for range 3 {
+		<-ch
+	}
+	t.Log(result)
+}
+
+func TestImmediateCallEvaluatesArgumentsFirst(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	func(bool) {
+		for range 3 {
+			<-ch
+		}
+	}(func() bool {
+		ch = ready
+		return true
+	}())
+}
+
+func TestImmediateCallRunsAfterTrueAnd(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	_ = true && func() bool {
+		ch = ready
+		return true
+	}()
+	for range 3 {
+		<-ch
+	}
+}
+
+func TestReceiveAfterImmediateSkip(t *testing.T) {
+	ch := time.After(time.Second)
+	_ = func() bool {
+		t.SkipNow()
+		return false
+	}()
+	for range 3 {
+		<-ch
+	}
+}

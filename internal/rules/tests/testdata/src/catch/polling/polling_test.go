@@ -631,3 +631,43 @@ func TestClockGuardEndingWithSkip(t *testing.T) {
 		}
 	}
 }
+
+func TestImmediateCallInstallsDeadline(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	var ch <-chan Time = ready
+	_ = testing.Short() && func() bool {
+		ch = After(Second)
+		return true
+	}()
+	for range 3 { // want "polling against the wall clock"
+		<-ch
+	}
+}
+
+func TestDeferredCallDoesNotReplaceDeadline(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	ch := After(Second)
+	defer func() { ch = ready }()
+	for range 3 { // want "polling against the wall clock"
+		<-ch
+	}
+}
+
+func TestShortCircuitedCallDoesNotReplaceDeadline(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	ch := After(Second)
+	_ = true || func() bool {
+		ch = ready
+		return false
+	}()
+	_ = testing.Short() && func() bool {
+		ch = ready
+		return true
+	}()
+	for range 3 { // want "polling against the wall clock"
+		<-ch
+	}
+}

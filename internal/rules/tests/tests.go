@@ -76,6 +76,15 @@ func calledFunc(info *types.Info, call *ast.CallExpr) *types.Func {
 	return fn
 }
 
+func immediateLiteral(call *ast.CallExpr, parent ast.Node) *ast.FuncLit {
+	switch parent.(type) {
+	case *ast.DeferStmt, *ast.GoStmt:
+		return nil
+	}
+	literal, _ := ast.Unparen(call.Fun).(*ast.FuncLit)
+	return literal
+}
+
 func packageCall(info *types.Info, call *ast.CallExpr, path string, names ...string) bool {
 	fn := calledFunc(info, call)
 	return fn != nil && fn.Signature().Recv() == nil && namedInPackage(fn, path, names)

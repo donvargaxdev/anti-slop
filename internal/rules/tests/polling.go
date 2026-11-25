@@ -2,6 +2,7 @@ package tests
 
 import (
 	"go/ast"
+	"go/constant"
 	"go/token"
 	"go/types"
 	"maps"
@@ -37,6 +38,7 @@ type pollingScan struct {
 	clockGuards   map[ast.Node]bool
 	target        *branchTarget[pollingFlow]
 	continuations *pollingContinuations
+	returns       *pollingFlow
 }
 
 type pollingFlow struct {
@@ -128,10 +130,16 @@ func (scan *pollingScan) record(root ast.Node) {
 	if root == nil {
 		return
 	}
-	ast.Inspect(root, scan.visit)
+	ast.PreorderStack(root, nil, func(node ast.Node, parents []ast.Node) bool {
+		var parent ast.Node
+		if len(parents) > 0 {
+			parent = parents[len(parents)-1]
+		}
+		return scan.visit(node, parent)
+	})
 }
 
-func (scan *pollingScan) visit(node ast.Node) bool {
+func (scan *pollingScan) visit(node, parent ast.Node) bool {
 	if scan.tracked == nil {
 		return false
 	}
@@ -142,11 +150,18 @@ func (scan *pollingScan) visit(node ast.Node) bool {
 	}
 	switch expr := node.(type) {
 	case *ast.FuncLit:
-		body := scan.fork()
-		body.target = nil
-		body.continuations = nil
-		body.bypassed = false
-		body.record(expr.Body)
+		scan.recordLiteral(expr, nil)
+	case *ast.CallExpr:
+		literal := immediateLiteral(expr, parent)
+		if literal == nil {
+			return true
+		}
+		scan.recordImmediateCall(expr, literal)
+	case *ast.BinaryExpr:
+		if expr.Op != token.LAND && expr.Op != token.LOR {
+			return true
+		}
+		scan.recordShortCircuit(expr)
 	case *ast.IfStmt:
 		scan.record(expr.Init)
 		clockGuard := scan.isClockGuard(expr.Cond)
@@ -185,6 +200,9 @@ func (scan *pollingScan) visit(node ast.Node) bool {
 			scan.record(result)
 		}
 		scan.recordExit()
+		if scan.returns != nil {
+			*scan.returns = mergePollingFlows(*scan.returns, scan.pollingFlow)
+		}
 		scan.stopPath()
 	case *ast.ExprStmt:
 		if !endsTest(scan.info, expr.X) {
@@ -214,6 +232,45 @@ func (scan *pollingScan) visit(node ast.Node) bool {
 		return true
 	}
 	return false
+}
+
+func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.FuncLit) {
+	for _, arg := range call.Args {
+		scan.record(arg)
+	}
+	var returns pollingFlow
+	fallthroughFlow := scan.recordLiteral(literal, &returns)
+	// Explicit returns and fallthrough both resume the caller.
+	resumed := mergePollingFlows(fallthroughFlow, returns)
+	if resumed.tracked == nil {
+		scan.recordExit()
+		scan.stopPath()
+		return
+	}
+	scan.tracked = resumed.tracked
+}
+
+func (scan *pollingScan) recordLiteral(literal *ast.FuncLit, returns *pollingFlow) pollingFlow {
+	body := scan.fork()
+	body.target = nil
+	body.continuations = nil
+	body.bypassed = false
+	body.returns = returns
+	body.record(literal.Body)
+	return body.pollingFlow
+}
+
+func (scan *pollingScan) recordShortCircuit(expr *ast.BinaryExpr) {
+	scan.record(expr.X)
+	if value := scan.info.Types[expr.X].Value; value != nil {
+		if constant.BoolVal(value) == (expr.Op == token.LAND) {
+			scan.record(expr.Y)
+		}
+		return
+	}
+	right := scan.fork()
+	right.record(expr.Y)
+	scan.pollingFlow = mergePollingFlows(scan.pollingFlow, right.pollingFlow)
 }
 
 func (scan *pollingScan) markBypassed(guardedContinue bool) {
@@ -358,7 +415,7 @@ func (scan *pollingScan) recordLoop(label types.Object, bounds loopBounds, body 
 	}
 }
 
-func (scan pollingScan) recordRangeAssignment(stmt *ast.RangeStmt) {
+func (scan *pollingScan) recordRangeAssignment(stmt *ast.RangeStmt) {
 	targets := [...]ast.Expr{stmt.Key, stmt.Value}
 	for _, target := range targets {
 		scan.record(target)
@@ -371,7 +428,7 @@ func (scan pollingScan) recordRangeAssignment(stmt *ast.RangeStmt) {
 	}
 }
 
-func (scan pollingScan) recordAssignment(stmt *ast.AssignStmt) {
+func (scan *pollingScan) recordAssignment(stmt *ast.AssignStmt) {
 	for _, lhs := range stmt.Lhs {
 		scan.record(lhs)
 	}
@@ -385,7 +442,7 @@ func (scan pollingScan) recordAssignment(stmt *ast.AssignStmt) {
 }
 
 // Evaluate the right-hand sides before replacing any of the assigned values.
-func (scan pollingScan) values(exprs []ast.Expr, count int) []bool {
+func (scan *pollingScan) values(exprs []ast.Expr, count int) []bool {
 	values := make([]bool, count)
 	for i, expr := range exprs {
 		scan.record(expr)
@@ -397,6 +454,9 @@ func (scan pollingScan) values(exprs []ast.Expr, count int) []bool {
 }
 
 func (scan pollingScan) store(name *ast.Ident, tracked bool) {
+	if scan.tracked == nil {
+		return
+	}
 	object := scan.info.ObjectOf(name)
 	if tracked {
 		scan.tracked[object] = true
