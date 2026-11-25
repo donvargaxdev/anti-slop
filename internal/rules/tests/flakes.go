@@ -19,46 +19,93 @@ var Flakes = &analysis.Analyzer{
 
 type flakeChecks struct {
 	info     *types.Info
-	outcomes map[types.Object]bool
+	outcomes map[types.Object]outcomePolarity
 }
+
+type outcomePolarity uint8
+
+const (
+	failsWhenTrue outcomePolarity = 1 << iota
+	failsWhenFalse
+)
 
 func runFlakes(pass *analysis.Pass) (any, error) {
 	info := pass.TypesInfo
-	checks := flakeChecks{info: info, outcomes: make(map[types.Object]bool)}
+	checks := flakeChecks{info: info, outcomes: make(map[types.Object]outcomePolarity)}
 	skips := make(map[token.Pos]bool)
-	visitTests(pass, func(node ast.Node) {
-		switch stmt := node.(type) {
-		case *ast.ForStmt:
-			if checks.retriesInHeader(stmt) || checks.retriesLoop(stmt.Body) {
-				report(pass, stmt, "retrying a check or test body")
-			}
-		case *ast.RangeStmt:
-			if checks.retriesLoop(stmt.Body) {
-				report(pass, stmt, "retrying a check or test body")
-			}
-		case *ast.AssignStmt:
-			checks.rememberOutcome(stmt)
-		case *ast.IfStmt:
-			if assign, ok := stmt.Init.(*ast.AssignStmt); ok {
-				checks.rememberOutcome(assign)
-			}
-			if branch := checks.failureBranch(stmt, true, nil); branch != nil {
-				contains(branch, func(node ast.Node) bool {
-					if call, ok := node.(*ast.CallExpr); ok && !skips[call.Pos()] &&
-						testingMethod(info, call, "Skip", "Skipf", "SkipNow") {
-						report(pass, call, "skipping after a failure")
-						skips[call.Pos()] = true
-					}
-					return false
-				})
-			}
-		case *ast.CallExpr:
-			if wrapsTestInRetry(info, stmt) {
-				report(pass, stmt, "retrying a test body")
-			}
-		}
+	visitTestFiles(pass, func(file *ast.File) {
+		checks.walk(file, func(checks flakeChecks, node, _ ast.Node) bool {
+			checks.reportFinding(pass, node, skips)
+			return true
+		})
 	})
 	return nil, nil
+}
+
+func (c flakeChecks) reportFinding(pass *analysis.Pass, node ast.Node, skips map[token.Pos]bool) {
+	switch stmt := node.(type) {
+	case *ast.ForStmt:
+		if c.retriesInHeader(stmt) || c.retriesLoop(stmt.Body) {
+			report(pass, stmt, "retrying a check or test body")
+		}
+	case *ast.RangeStmt:
+		if c.retriesLoop(stmt.Body) {
+			report(pass, stmt, "retrying a check or test body")
+		}
+	case *ast.IfStmt:
+		for _, branch := range c.outcomeBranches(stmt, true, nil) {
+			if branch == nil {
+				continue
+			}
+			contains(branch, func(node ast.Node) bool {
+				if call, ok := node.(*ast.CallExpr); ok && !skips[call.Pos()] &&
+					testingMethod(c.info, call, "Skip", "Skipf", "SkipNow") {
+					report(pass, call, "skipping after a failure")
+					skips[call.Pos()] = true
+				}
+				return false
+			})
+		}
+	case *ast.CallExpr:
+		if wrapsTestInRetry(c.info, stmt) {
+			report(pass, stmt, "retrying a test body")
+		}
+	}
+}
+
+// walk visits an if after its initializer. Both branches start with that same
+// outcome state, and either branch can supply the outcome after the if.
+func (c flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.Node) bool) {
+	if root == nil {
+		return
+	}
+	ast.PreorderStack(root, nil, func(node ast.Node, parents []ast.Node) bool {
+		var parent ast.Node
+		if len(parents) > 0 {
+			parent = parents[len(parents)-1]
+		}
+		if stmt, ok := node.(*ast.IfStmt); ok {
+			c.walk(stmt.Init, visit)
+			if visit(c, stmt, parent) {
+				c.walk(stmt.Cond, visit)
+				then := c
+				then.outcomes = maps.Clone(c.outcomes)
+				then.walk(stmt.Body, visit)
+				c.walk(stmt.Else, visit)
+				for object, polarity := range then.outcomes {
+					c.outcomes[object] |= polarity
+				}
+			}
+			return false
+		}
+		if !visit(c, node, parent) {
+			return false
+		}
+		if stmt, ok := node.(*ast.AssignStmt); ok {
+			c.rememberOutcome(stmt)
+		}
+		return true
+	})
 }
 
 // rememberOutcome follows simple assignments of testing status to a local
@@ -70,17 +117,20 @@ func (c flakeChecks) rememberOutcome(stmt *ast.AssignStmt) {
 			continue
 		}
 		object := c.info.ObjectOf(ident)
+		var polarity outcomePolarity
 		if len(stmt.Lhs) == len(stmt.Rhs) && booleanResult(c.info, stmt.Rhs[i]) {
 			if c.failureCondition(stmt.Rhs[i], true, nil) {
-				c.outcomes[object] = true
-				continue
+				polarity |= failsWhenTrue
 			}
 			if c.failureCondition(stmt.Rhs[i], false, nil) {
-				c.outcomes[object] = false
-				continue
+				polarity |= failsWhenFalse
 			}
 		}
-		delete(c.outcomes, object)
+		if polarity == 0 {
+			delete(c.outcomes, object)
+		} else {
+			c.outcomes[object] = polarity
+		}
 	}
 }
 
@@ -88,22 +138,21 @@ func (c flakeChecks) retriesLoop(body *ast.BlockStmt) bool {
 	// The main traversal still needs the state from before entering the loop.
 	c.outcomes = maps.Clone(c.outcomes)
 	found := false
-	ast.PreorderStack(body, nil, func(node ast.Node, parents []ast.Node) bool {
+	c.walk(body, func(c flakeChecks, node, parent ast.Node) bool {
 		if found {
 			return false
 		}
-		switch node := node.(type) {
+		switch stmt := node.(type) {
 		case *ast.FuncLit, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
 			return false
-		case *ast.AssignStmt:
-			c.rememberOutcome(node)
-		}
-		// Inspect an if at its condition so its initializer has already been visited.
-		if count := len(parents); count >= 2 {
-			if stmt, ok := parents[count-1].(*ast.IfStmt); ok && node == stmt.Cond {
-				found = exitsAttempt(lastStatement(c.failureBranch(stmt, false, body))) ||
-					c.continuesUntilSuccess(stmt, body, parents[count-2])
+		case *ast.IfStmt:
+			for _, branch := range c.outcomeBranches(stmt, false, body) {
+				if exitsAttempt(lastStatement(branch)) {
+					found = true
+					return false
+				}
 			}
+			found = c.continuesUntilSuccess(stmt, body, parent)
 		}
 		return !found
 	})
@@ -120,14 +169,15 @@ func (c flakeChecks) retriesInHeader(loop *ast.ForStmt) bool {
 	return false
 }
 
-func (c flakeChecks) failureBranch(stmt *ast.IfStmt, failure bool, attempt ast.Node) ast.Stmt {
+func (c flakeChecks) outcomeBranches(stmt *ast.IfStmt, failure bool, attempt ast.Node) [2]ast.Stmt {
+	var branches [2]ast.Stmt
 	if c.failureCondition(stmt.Cond, failure, attempt) {
-		return stmt.Body
+		branches[0] = stmt.Body
 	}
-	if c.failureCondition(stmt.Cond, !failure, attempt) {
-		return stmt.Else
+	if stmt.Else != nil && c.failureCondition(stmt.Cond, !failure, attempt) {
+		branches[1] = stmt.Else
 	}
-	return nil
+	return branches
 }
 
 // failureCondition recognizes a check whose success or failure determines this
@@ -148,8 +198,11 @@ func (c flakeChecks) failureCondition(condition ast.Expr, failure bool, attempt 
 			return !failure && booleanResult(c.info, expr) && !packageCall(c.info, expr, "testing", "Short")
 		}
 	case *ast.Ident:
-		if failed, known := c.outcomes[c.info.ObjectOf(expr)]; known && attemptResult(c.info, expr, attempt) {
-			return failure == failed
+		if polarity := c.outcomes[c.info.ObjectOf(expr)]; polarity != 0 && attemptResult(c.info, expr, attempt) {
+			if failure {
+				return polarity&failsWhenTrue != 0
+			}
+			return polarity&failsWhenFalse != 0
 		}
 		return !failure && attempt != nil && attemptResult(c.info, expr, attempt) && booleanResult(c.info, expr)
 	}
@@ -236,7 +289,7 @@ func exitsAttempt(stmt ast.Stmt) bool {
 }
 
 func (c flakeChecks) continuesUntilSuccess(stmt *ast.IfStmt, body *ast.BlockStmt, parent ast.Node) bool {
-	if stmt.Else != nil || c.failureBranch(stmt, true, body) != stmt.Body {
+	if stmt.Else != nil || !c.failureCondition(stmt.Cond, true, body) {
 		return false
 	}
 	branch, ok := lastStatement(stmt.Body).(*ast.BranchStmt)
@@ -249,7 +302,15 @@ func (c flakeChecks) continuesUntilSuccess(stmt *ast.IfStmt, body *ast.BlockStmt
 		return false
 	}
 	next := slices.Index(block.List, ast.Stmt(stmt)) + 1
-	return next < len(block.List) && exitsAttempt(block.List[next])
+	for _, sibling := range block.List[next:] {
+		if exitsAttempt(sibling) {
+			return true
+		}
+		if _, jump := sibling.(*ast.BranchStmt); jump {
+			return false
+		}
+	}
+	return false
 }
 
 func wrapsTestInRetry(info *types.Info, call *ast.CallExpr) bool {

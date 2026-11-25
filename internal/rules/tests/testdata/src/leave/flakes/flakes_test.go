@@ -129,6 +129,40 @@ func TestChecksWithoutRetryExits(t *testing.T) {
 	}
 }
 
+func TestContinueWithConditionalSuccessExit(t *testing.T) {
+	for i := range 3 {
+		if err := validate(i); err != nil {
+			t.Error(err)
+			continue
+		}
+		t.Log("case passed")
+		if testing.Short() {
+			break
+		}
+	}
+}
+
+func TestSkipOnIndependentBranch(t *testing.T) {
+	skip := false
+	if testing.Short() {
+		skip = t.Failed()
+	} else if skip {
+		t.Skip("optional test")
+	}
+}
+
+func TestSkipOnOverwrittenOutcome(t *testing.T) {
+	skip := t.Failed()
+	if testing.Short() {
+		skip = available()
+	} else {
+		skip = false
+	}
+	if skip {
+		t.Skip("optional test")
+	}
+}
+
 func TestStopOnStoredFailure(t *testing.T) {
 	outcome := t.Run("setup", func(t *testing.T) {})
 	for i := range 3 {

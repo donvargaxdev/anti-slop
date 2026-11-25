@@ -85,6 +85,23 @@ func TestRetryCheckUntilBreak(t *test.T) {
 	}
 }
 
+func TestRetryCheckWithSuccessWork(t *test.T) {
+	for range 3 { // want "retrying a check or test body"
+		if err := check(); err != nil {
+			continue
+		}
+		t.Log("check passed")
+		return
+	}
+	for range 3 { // want "retrying a check or test body"
+		if check() != nil {
+			continue
+		}
+		t.Log("check passed")
+		break
+	}
+}
+
 func TestRetrySubtest(t *test.T) {
 	for range 3 { // want "retrying a check or test body"
 		if t.Run("body", func(t *test.T) { t.Fatal("failure") }) {
@@ -170,6 +187,28 @@ func TestSkipOnCompoundFailure(t *test.T) {
 	}
 	if t.Failed() || check() != nil {
 		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnConditionallyOverwrittenFailure(t *test.T) {
+	failed := t.Failed()
+	if test.Short() {
+		failed = false
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnMergedOutcomePolarities(t *test.T) {
+	outcome := t.Failed()
+	if test.Short() {
+		outcome = t.Run("body", body)
+	}
+	if outcome {
+		t.Skip("test failed") // want "skipping after a failure"
+	} else {
+		t.Skip("subtest failed") // want "skipping after a failure"
 	}
 }
 
