@@ -578,26 +578,31 @@ func (c flakeChecks) isShortMode(value ast.Expr) bool {
 }
 
 // A branch testing a stored outcome can only carry its matching polarity.
-func (c *flakeChecks) constrainOutcome(condition ast.Expr, possible outcomePolarity) {
+func (c *flakeChecks) constrainOutcome(condition ast.Expr, possible outcomePolarity, later ...ast.Expr) {
 	if c.outcomes == nil {
 		return
 	}
 	switch expr := ast.Unparen(condition).(type) {
 	case *ast.Ident:
-		polarity := c.outcomes[c.info.Uses[expr]]
-		if polarity != shortMode {
+		object := c.info.Uses[expr]
+		polarity := c.outcomes[object]
+		if polarity != shortMode && !c.outcomeReassigned(object, later) {
 			c.storeOutcome(expr, polarity&possible)
 		}
 	case *ast.UnaryExpr:
 		if expr.Op == token.NOT {
-			c.constrainOutcome(expr.X, possible^(failsWhenTrue|failsWhenFalse))
+			c.constrainOutcome(expr.X, possible^(failsWhenTrue|failsWhenFalse), later...)
 		}
 	case *ast.BinaryExpr:
-		if operand, same := booleanComparison(c.info, expr); operand != nil {
+		if (expr.Op == token.LAND && possible == failsWhenTrue) ||
+			(expr.Op == token.LOR && possible == failsWhenFalse) {
+			c.constrainOutcome(expr.X, possible, append(later, expr.Y)...)
+			c.constrainOutcome(expr.Y, possible, later...)
+		} else if operand, same := booleanComparison(c.info, expr); operand != nil {
 			if !same {
 				possible ^= failsWhenTrue | failsWhenFalse
 			}
-			c.constrainOutcome(operand, possible)
+			c.constrainOutcome(operand, possible, later...)
 		} else if expr.Op == token.EQL || expr.Op == token.NEQ {
 			equal := (expr.Op == token.EQL) == (possible == failsWhenTrue)
 			if c.isNil(expr.Y) {

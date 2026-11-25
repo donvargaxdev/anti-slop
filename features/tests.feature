@@ -222,6 +222,16 @@ Feature: Test reliability
           }
       }
 
+      func TestHandledCompoundGuard(t *testing.T) {
+          failed := t.Failed()
+          if failed || testing.Verbose() {
+              return
+          }
+          if failed {
+              t.Skip("optional")
+          }
+      }
+
       func check() error { return nil }
       """
     When anti-slop runs with "tests ./..."

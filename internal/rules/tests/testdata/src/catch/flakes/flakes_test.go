@@ -1094,3 +1094,30 @@ func TestSelectReceiveTargetRunsOnlyInItsCase(t *test.T) {
 		}
 	}
 }
+
+func TestSkipAfterAmbiguousCompoundGuards(t *test.T) {
+	failed := t.Failed()
+	if failed && test.Verbose() {
+		return
+	}
+	if !(failed || test.Short()) {
+		return
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipAfterCompoundGuardReassignsStoredFailure(t *test.T) {
+	failed := t.Failed()
+	if failed || func() bool {
+		t.Error("failed")
+		failed = t.Failed()
+		return false
+	}() {
+		return
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}

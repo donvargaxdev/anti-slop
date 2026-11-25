@@ -196,3 +196,21 @@ func booleanResult(info *types.Info, expr ast.Expr) bool {
 	typ := info.TypeOf(expr)
 	return typ != nil && types.Identical(typ.Underlying(), types.Typ[types.Bool])
 }
+
+// Later operands can write a stored outcome through a function literal.
+func (c flakeChecks) outcomeReassigned(object types.Object, later []ast.Expr) bool {
+	for _, operand := range later {
+		for node := range ast.Preorder(operand) {
+			assign, ok := node.(*ast.AssignStmt)
+			if !ok {
+				continue
+			}
+			for _, target := range assign.Lhs {
+				if name, ok := ast.Unparen(target).(*ast.Ident); ok && c.info.Uses[name] == object {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}

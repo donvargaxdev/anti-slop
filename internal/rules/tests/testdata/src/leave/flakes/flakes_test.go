@@ -1132,3 +1132,23 @@ func TestSelectOperandsClearFailureBeforeAnyBody(t *testing.T) {
 		t.Skip("optional")
 	}
 }
+
+func TestSkipAfterDisjunctiveGuard(t *testing.T) {
+	failed := t.Failed()
+	if failed || testing.Verbose() {
+		return
+	}
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipAfterConjunctiveGuard(t *testing.T) {
+	failed := t.Failed()
+	if !(testing.Verbose() && !failed) {
+		return
+	}
+	if failed {
+		t.Skip("optional")
+	}
+}
