@@ -12,8 +12,8 @@ func TestDeadlineScanWithUnmatchedBreakLabel(t *testing.T) {
 	target := types.NewLabel(token.NoPos, nil, "outer")
 	channel := types.NewVar(token.NoPos, nil, "deadline", types.NewChan(types.RecvOnly, types.Typ[types.Int]))
 	scan := pollingScan{
-		info:    &types.Info{Uses: map[*ast.Ident]types.Object{label: target}},
-		tracked: map[types.Object]bool{channel: true},
+		info:        &types.Info{Uses: map[*ast.Ident]types.Object{label: target}},
+		pollingFlow: pollingFlow{tracked: map[types.Object]bool{channel: true}},
 	}
 
 	// Type-checked fixtures cannot contain a break to an unregistered label.

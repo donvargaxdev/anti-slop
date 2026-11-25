@@ -69,6 +69,16 @@ Feature: Test reliability
               t.Skip("failed")
           }
       }
+
+      func TestTimeoutGuard(t *testing.T) {
+          started := time.Now()
+          for {
+              if time.Since(started) < time.Second {
+                  continue
+              }
+              t.Fatal("timeout")
+          }
+      }
       """
     When anti-slop runs with "tests ./..."
     Then it exits with code 0
@@ -80,6 +90,7 @@ Feature: Test reliability
       p_test.go:23:9: tests: skipping after a failure
       p_test.go:29:5: tests: polling against the wall clock
       p_test.go:46:9: tests: skipping after a failure
+      p_test.go:52:5: tests: polling against the wall clock
       """
     And its error output is empty
 

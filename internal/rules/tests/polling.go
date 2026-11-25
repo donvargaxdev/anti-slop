@@ -31,26 +31,39 @@ func runPolling(pass *analysis.Pass) (any, error) {
 
 type pollingScan struct {
 	info *types.Info
+	pollingFlow
+	dependsOn     func(ast.Expr, map[types.Object]bool) bool
+	receives      map[*ast.UnaryExpr]bool
+	clockGuards   map[ast.Node]bool
+	target        *branchTarget[pollingFlow]
+	continuations *pollingContinuations
+}
+
+type pollingFlow struct {
 	// A nil map marks a path that branched away.
-	tracked     map[types.Object]bool
-	dependsOn   func(ast.Expr, map[types.Object]bool) bool
-	receives    map[*ast.UnaryExpr]bool
-	clockGuards map[ast.Node]bool
-	target      *branchTarget[bool]
+	tracked map[types.Object]bool
+	// A clock-controlled continue can bypass this path in the current iteration.
+	bypassed bool
+}
+
+type pollingContinuations struct {
+	// Shared by branch scans so a guard can detect continues to the analyzed loop.
+	count        int
+	bypassesExit bool
 }
 
 type branchTarget[T any] struct {
 	label     types.Object
 	isLoop    bool
-	breaks    map[types.Object]T
-	continues map[types.Object]T
+	breaks    T
+	continues T
 	parent    *branchTarget[T]
 }
 
 func deadlineReceives(pass *analysis.Pass) map[*ast.UnaryExpr]bool {
 	scan := pollingScan{
-		info:    pass.TypesInfo,
-		tracked: make(map[types.Object]bool),
+		info:        pass.TypesInfo,
+		pollingFlow: pollingFlow{tracked: make(map[types.Object]bool)},
 		dependsOn: func(expr ast.Expr, tracked map[types.Object]bool) bool {
 			return afterDeadline(pass.TypesInfo, expr, tracked)
 		},
@@ -80,16 +93,35 @@ func (scan pollingScan) fork() *pollingScan {
 
 func (scan pollingScan) withTarget(label types.Object, isLoop bool) *pollingScan {
 	branch := scan.fork()
-	branch.target = &branchTarget[bool]{label: label, isLoop: isLoop, parent: scan.target}
+	branch.target = &branchTarget[pollingFlow]{label: label, isLoop: isLoop, parent: scan.target}
 	return branch
 }
 
-func mergeTracked(dst, src map[types.Object]bool) map[types.Object]bool {
-	if dst == nil {
-		return maps.Clone(src)
+func mergePollingFlows(dst, src pollingFlow) pollingFlow {
+	if dst.tracked == nil {
+		src.tracked = maps.Clone(src.tracked)
+		return src
 	}
-	maps.Copy(dst, src)
+	maps.Copy(dst.tracked, src.tracked)
+	dst.bypassed = dst.bypassed || src.bypassed
 	return dst
+}
+
+func (scan *pollingScan) stopPath() {
+	scan.pollingFlow = pollingFlow{}
+}
+
+func (scan *pollingScan) continueCount() int {
+	if scan.continuations == nil {
+		return 0
+	}
+	return scan.continuations.count
+}
+
+func (scan *pollingScan) recordExit() {
+	if scan.bypassed {
+		scan.continuations.bypassesExit = true
+	}
 }
 
 func (scan *pollingScan) record(root ast.Node) {
@@ -112,17 +144,22 @@ func (scan *pollingScan) visit(node ast.Node) bool {
 	case *ast.FuncLit:
 		body := scan.fork()
 		body.target = nil
+		body.continuations = nil
+		body.bypassed = false
 		body.record(expr.Body)
 	case *ast.IfStmt:
 		scan.record(expr.Init)
-		if scan.isClockGuard(expr.Cond) {
+		clockGuard := scan.isClockGuard(expr.Cond)
+		if clockGuard {
 			scan.clockGuards[expr] = true
 		}
 		scan.record(expr.Cond)
+		before := scan.continueCount()
 		other := scan.fork()
 		scan.record(expr.Body)
 		other.record(expr.Else)
-		scan.tracked = mergeTracked(scan.tracked, other.tracked)
+		scan.pollingFlow = mergePollingFlows(scan.pollingFlow, other.pollingFlow)
+		scan.markBypassed(clockGuard && scan.continueCount() != before)
 	case *ast.SwitchStmt:
 		scan.record(expr.Init)
 		scan.record(expr.Tag)
@@ -147,13 +184,15 @@ func (scan *pollingScan) visit(node ast.Node) bool {
 		for _, result := range expr.Results {
 			scan.record(result)
 		}
-		scan.tracked = nil
+		scan.recordExit()
+		scan.stopPath()
 	case *ast.ExprStmt:
 		if !endsTest(scan.info, expr.X) {
 			return true
 		}
 		scan.record(expr.X)
-		scan.tracked = nil
+		scan.recordExit()
+		scan.stopPath()
 	case *ast.BranchStmt:
 		switch expr.Tok {
 		case token.BREAK, token.CONTINUE:
@@ -177,17 +216,29 @@ func (scan *pollingScan) visit(node ast.Node) bool {
 	return false
 }
 
+func (scan *pollingScan) markBypassed(guardedContinue bool) {
+	if guardedContinue && scan.tracked != nil {
+		scan.bypassed = true
+	}
+}
+
 func (scan *pollingScan) recordBranch(stmt *ast.BranchStmt) {
 	target := scan.target.destination(scan.info, stmt)
 	if target == nil {
 		return
 	}
 	if stmt.Tok == token.CONTINUE {
-		target.continues = mergeTracked(target.continues, scan.tracked)
+		target.continues = mergePollingFlows(target.continues, scan.pollingFlow)
+		if scan.continuations != nil && target.parent == nil {
+			scan.continuations.count++
+		}
 	} else {
-		target.breaks = mergeTracked(target.breaks, scan.tracked)
+		target.breaks = mergePollingFlows(target.breaks, scan.pollingFlow)
+		if target.parent == nil {
+			scan.recordExit()
+		}
 	}
-	scan.tracked = nil
+	scan.stopPath()
 }
 
 func (target *branchTarget[T]) destination(info *types.Info, stmt *ast.BranchStmt) *branchTarget[T] {
@@ -204,14 +255,14 @@ func (target *branchTarget[T]) destination(info *types.Info, stmt *ast.BranchStm
 
 func (scan *pollingScan) recordSelect(body *ast.BlockStmt, label types.Object) {
 	entry := scan.withTarget(label, false)
-	scan.tracked = nil
+	scan.stopPath()
 	// Each clause starts from the same state, and only the selected clause assigns values.
 	for _, stmt := range body.List {
 		branch := entry.fork()
 		branch.record(stmt)
-		scan.tracked = mergeTracked(scan.tracked, branch.tracked)
+		scan.pollingFlow = mergePollingFlows(scan.pollingFlow, branch.pollingFlow)
 	}
-	scan.tracked = mergeTracked(scan.tracked, entry.target.breaks)
+	scan.pollingFlow = mergePollingFlows(scan.pollingFlow, entry.target.breaks)
 }
 
 func (scan *pollingScan) isClockGuard(expr ast.Expr) bool {
@@ -220,11 +271,12 @@ func (scan *pollingScan) isClockGuard(expr ast.Expr) bool {
 
 func (scan *pollingScan) recordSwitch(body *ast.BlockStmt, label types.Object, tag ast.Expr) {
 	entry := scan.withTarget(label, false)
-	scan.tracked = nil
+	scan.stopPath()
 	var defaultClause *ast.CaseClause
-	var fallingThrough map[types.Object]bool
+	var fallingThrough pollingFlow
 	tagReadsClock := entry.isClockGuard(tag)
 	anyClockCase, clockFallthrough := false, false
+	guardedContinue, defaultContinues := false, false
 	for _, stmt := range body.List {
 		clause := stmt.(*ast.CaseClause)
 		if clause.List == nil {
@@ -242,28 +294,35 @@ func (scan *pollingScan) recordSwitch(body *ast.BlockStmt, label types.Object, t
 			scan.clockGuards[clause] = true
 		}
 		// Fallthrough enters the case body without testing the case expressions.
-		maps.Copy(branch.tracked, fallingThrough)
+		branch.pollingFlow = mergePollingFlows(branch.pollingFlow, fallingThrough)
 		fallsThrough := false
+		before := scan.continueCount()
 		for _, stmt := range clause.Body {
 			branch.record(stmt)
 			fallsThrough = fallsThrough || isFallthrough(stmt)
 		}
+		continues := scan.continueCount() != before
+		if clause == defaultClause {
+			defaultContinues = continues
+		}
+		guardedContinue = guardedContinue || clockGuard && continues
 		if fallsThrough {
-			fallingThrough = branch.tracked
+			fallingThrough = branch.pollingFlow
 			clockFallthrough = clockGuard
 			continue
 		}
-		fallingThrough = nil
+		fallingThrough = pollingFlow{}
 		clockFallthrough = false
-		scan.tracked = mergeTracked(scan.tracked, branch.tracked)
+		scan.pollingFlow = mergePollingFlows(scan.pollingFlow, branch.pollingFlow)
 	}
 	if defaultClause == nil {
-		scan.tracked = mergeTracked(scan.tracked, entry.tracked)
+		scan.pollingFlow = mergePollingFlows(scan.pollingFlow, entry.pollingFlow)
 	} else if anyClockCase {
 		// Default runs only if none of the case expressions match.
 		scan.clockGuards[defaultClause] = true
 	}
-	scan.tracked = mergeTracked(scan.tracked, entry.target.breaks)
+	scan.pollingFlow = mergePollingFlows(scan.pollingFlow, entry.target.breaks)
+	scan.markBypassed(guardedContinue || anyClockCase && defaultContinues)
 }
 
 func isFallthrough(stmt ast.Stmt) bool {
@@ -281,19 +340,19 @@ func (scan *pollingScan) recordLoop(label types.Object, bounds loopBounds, body 
 		beforeBody(iteration)
 		iteration.record(body)
 		// A continue bypasses the rest of the body and still runs the post statement.
-		iteration.tracked = mergeTracked(iteration.tracked, entry.target.continues)
+		iteration.pollingFlow = mergePollingFlows(iteration.pollingFlow, entry.target.continues)
 		iteration.record(post)
 		// A value assigned on one iteration can be used on the next.
 		previous := len(entry.tracked)
 		maps.Copy(entry.tracked, iteration.tracked)
 		if count == bounds.maxIterations || len(entry.tracked) == previous {
-			scan.tracked = iteration.tracked
+			scan.pollingFlow = iteration.pollingFlow
 			if bounds.maySkip {
 				// The loop can leave incoming values untouched by skipping its body.
-				scan.tracked = mergeTracked(scan.tracked, entry.tracked)
+				scan.pollingFlow = mergePollingFlows(scan.pollingFlow, entry.pollingFlow)
 			}
 			// Break paths bypass the remaining body and post statement.
-			scan.tracked = mergeTracked(scan.tracked, entry.target.breaks)
+			scan.pollingFlow = mergePollingFlows(scan.pollingFlow, entry.target.breaks)
 			return
 		}
 	}
@@ -377,12 +436,13 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 	// Start with an empty state so a fixed snapshot taken before the loop does
 	// not count as polling. Record each guard with the values that reach it.
 	scan := pollingScan{
-		info:    info,
-		tracked: make(map[types.Object]bool),
+		info:        info,
+		pollingFlow: pollingFlow{tracked: make(map[types.Object]bool)},
 		dependsOn: func(expr ast.Expr, tracked map[types.Object]bool) bool {
 			return readsClock(info, expr) || usesTrackedValue(info, expr, tracked)
 		},
-		clockGuards: make(map[ast.Node]bool),
+		clockGuards:   make(map[ast.Node]bool),
+		continuations: &pollingContinuations{},
 	}
 	clockInHeader := false
 	scan.recordLoop(label, bounds, body, post, func(iteration *pollingScan) {
@@ -391,7 +451,7 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 		}
 		clockInHeader = clockInHeader || usesTrackedValue(info, condition, iteration.tracked)
 	})
-	return clockInHeader || pollsInBody(info, body, receives, scan.clockGuards)
+	return clockInHeader || scan.continuations.bypassesExit || pollsInBody(info, body, receives, scan.clockGuards)
 }
 
 func usesTrackedValue(info *types.Info, expr ast.Expr, tracked map[types.Object]bool) bool {

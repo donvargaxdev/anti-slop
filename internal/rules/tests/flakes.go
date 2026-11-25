@@ -21,7 +21,7 @@ type flakeChecks struct {
 	info *types.Info
 	// A nil map marks a path that jumped away.
 	outcomes     map[types.Object]outcomePolarity
-	target       *branchTarget[outcomePolarity]
+	target       *branchTarget[map[types.Object]outcomePolarity]
 	failureGuard bool
 	retryBody    *ast.BlockStmt
 	successCase  bool
@@ -191,7 +191,7 @@ func (c flakeChecks) fork() *flakeChecks {
 
 func (c flakeChecks) withTarget(label types.Object, isLoop bool) *flakeChecks {
 	branch := c.fork()
-	branch.target = &branchTarget[outcomePolarity]{label: label, isLoop: isLoop, parent: c.target}
+	branch.target = &branchTarget[map[types.Object]outcomePolarity]{label: label, isLoop: isLoop, parent: c.target}
 	return branch
 }
 

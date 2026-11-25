@@ -393,6 +393,40 @@ func TestPollUntilFatal(t *testing.T) {
 	}
 }
 
+func TestPollWithLabeledContinueBeforeExit(t *testing.T) {
+	start := Now()
+poll:
+	for { // want "polling against the wall clock"
+		if elapsed := Since(start); elapsed < Second {
+			for range 2 {
+				continue poll
+			}
+		}
+		break
+	}
+}
+
+func pollWithClockSwitchBeforeReturn(start Time) {
+	for { // want "polling against the wall clock"
+		switch {
+		case Since(start) < Second:
+			continue
+		}
+		return
+	}
+}
+
+func pollWithContinueInDefault(start Time) {
+	for { // want "polling against the wall clock"
+		switch {
+		default:
+			continue
+		case Since(start) >= Second:
+		}
+		return
+	}
+}
+
 func TestPollUntilFatalf(t *testing.T) {
 	start := Now()
 	for range 3 { // want "polling against the wall clock"

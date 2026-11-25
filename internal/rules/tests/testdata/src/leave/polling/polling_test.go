@@ -472,6 +472,41 @@ func TestClockSwitchWithLocalBreak(t *testing.T) {
 	}
 }
 
+func TestClockContinueSkipsWork(t *testing.T) {
+	start := time.Now()
+	for range 3 {
+		if time.Since(start) < time.Second {
+			continue
+		}
+		t.Log("slow")
+	}
+}
+
+func TestClockContinueInSeparateBranch(t *testing.T) {
+	start := time.Now()
+	for range 3 {
+		if testing.Short() {
+			if time.Since(start) < time.Second {
+				continue
+			}
+		} else {
+			t.Fatal("unsupported")
+		}
+	}
+}
+
+func TestClockContinueTargetsInnerLoop(t *testing.T) {
+	start := time.Now()
+	for range 3 {
+		if time.Since(start) < time.Second {
+			for range 2 {
+				continue
+			}
+		}
+		t.Fatal("unsupported")
+	}
+}
+
 func TestReceiveAfterFatalBranch(t *testing.T) {
 	ready := make(chan time.Time)
 	close(ready)
