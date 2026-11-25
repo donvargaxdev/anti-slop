@@ -200,6 +200,23 @@ func TestSkipOnConditionallyOverwrittenFailure(t *test.T) {
 	}
 }
 
+func TestSkipOnDeclaredFailure(t *test.T) {
+	var failed = t.Failed()
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestRetryWithDeclaredFailure(t *test.T) {
+	for range 3 { // want "retrying a check or test body"
+		var failed, _ = !t.Run("body", body), true
+		if failed {
+			continue
+		}
+		break
+	}
+}
+
 func TestSkipOnMergedOutcomePolarities(t *test.T) {
 	outcome := t.Failed()
 	if test.Short() {

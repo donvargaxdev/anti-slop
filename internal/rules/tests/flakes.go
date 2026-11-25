@@ -101,36 +101,42 @@ func (c flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.N
 		if !visit(c, node, parent) {
 			return false
 		}
-		if stmt, ok := node.(*ast.AssignStmt); ok {
-			c.rememberOutcome(stmt)
+		switch stmt := node.(type) {
+		case *ast.AssignStmt:
+			for i, lhs := range stmt.Lhs {
+				if ident, ok := lhs.(*ast.Ident); ok {
+					c.rememberOutcome(ident, stmt.Rhs, i, len(stmt.Lhs))
+				}
+			}
+		case *ast.ValueSpec:
+			for i, name := range stmt.Names {
+				c.rememberOutcome(name, stmt.Values, i, len(stmt.Names))
+			}
 		}
 		return true
 	})
 }
 
-// rememberOutcome follows simple assignments of testing status to a local
+// rememberOutcome follows simple assignments and declarations of testing status in a
 // variable so retry and skip checks can use the stored result's polarity.
-func (c flakeChecks) rememberOutcome(stmt *ast.AssignStmt) {
-	for i, lhs := range stmt.Lhs {
-		ident, ok := lhs.(*ast.Ident)
-		if !ok || ident.Name == "_" {
-			continue
+func (c flakeChecks) rememberOutcome(name *ast.Ident, values []ast.Expr, index, nameCount int) {
+	if name.Name == "_" {
+		return
+	}
+	object := c.info.ObjectOf(name)
+	var polarity outcomePolarity
+	if len(values) == nameCount && booleanResult(c.info, values[index]) {
+		if c.failureCondition(values[index], true, nil) {
+			polarity |= failsWhenTrue
 		}
-		object := c.info.ObjectOf(ident)
-		var polarity outcomePolarity
-		if len(stmt.Lhs) == len(stmt.Rhs) && booleanResult(c.info, stmt.Rhs[i]) {
-			if c.failureCondition(stmt.Rhs[i], true, nil) {
-				polarity |= failsWhenTrue
-			}
-			if c.failureCondition(stmt.Rhs[i], false, nil) {
-				polarity |= failsWhenFalse
-			}
+		if c.failureCondition(values[index], false, nil) {
+			polarity |= failsWhenFalse
 		}
-		if polarity == 0 {
-			delete(c.outcomes, object)
-		} else {
-			c.outcomes[object] = polarity
-		}
+	}
+	if polarity == 0 {
+		delete(c.outcomes, object)
+	} else {
+		c.outcomes[object] = polarity
 	}
 }
 

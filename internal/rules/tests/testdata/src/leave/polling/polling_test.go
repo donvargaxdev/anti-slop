@@ -177,6 +177,18 @@ func receiveAfterBreakBeforePost(ready <-chan time.Time) {
 	}
 }
 
+func receiveAfterContinueWithPost(ready <-chan time.Time) {
+	ch := ready
+	for i := 0; i < 1; ch = ready {
+		ch = time.After(time.Millisecond)
+		i++
+		continue
+	}
+	for range 1 {
+		<-ch
+	}
+}
+
 func TestDeadlineReassignedOnBothBranches(t *testing.T) {
 	ready := make(chan time.Time)
 	other := make(chan time.Time)
