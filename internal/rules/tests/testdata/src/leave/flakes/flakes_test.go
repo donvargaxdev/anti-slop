@@ -1346,3 +1346,44 @@ func stopIteratingAfterFailure(t *testing.T, keepAfterFailure bool) {
 		}
 	}
 }
+
+func TestDeferredSkipAfterOverwrite(t *testing.T) {
+	failed := t.Failed()
+	defer func() {
+		if failed {
+			t.Skip("optional")
+		}
+	}()
+	failed = true
+}
+
+func TestCleanupSkipAfterAddressedFlagChanges(t *testing.T) {
+	failed := t.Failed()
+	flag := &failed
+	t.Cleanup(func() {
+		if failed {
+			t.Skip("optional")
+		}
+	})
+	*flag = true
+}
+
+func TestDeferredSkipAfterRangeAssignment(t *testing.T) {
+	failed := t.Failed()
+	defer func() {
+		if failed {
+			t.Skip("optional")
+		}
+	}()
+	for _, failed = range []bool{true} {
+	}
+}
+
+func TestSkipWithZeroNamedError(t *testing.T) {
+	_, _ = func() (count int, err error) {
+		if err != nil {
+			t.Skip("optional")
+		}
+		return
+	}()
+}

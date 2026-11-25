@@ -1237,3 +1237,25 @@ func TestSkipOnFlagAssignedShortModeAfterFailure(t *test.T) {
 		t.SkipNow() // want "skipping after a failure"
 	}
 }
+
+func TestSkipAfterAssigningNamedError(t *test.T) {
+	_ = func() (err error) {
+		err = check()
+		if err != nil {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+		return
+	}()
+}
+
+func TestDeferredSkipOnCapturedFailureWithShadow(t *test.T) {
+	failed := t.Failed()
+	defer func() {
+		if failed {
+			t.Skip("failed") // want "skipping after a failure"
+		}
+	}()
+	if failed := test.Short(); failed {
+		t.Log("short")
+	}
+}

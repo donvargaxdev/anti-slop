@@ -296,6 +296,33 @@ func booleanResult(info *types.Info, expr ast.Expr) bool {
 	return typ != nil && types.Identical(typ.Underlying(), types.Typ[types.Bool])
 }
 
+// mutableVariables finds variables that can be written after initialization.
+func mutableVariables(info *types.Info, file *ast.File) map[types.Object]bool {
+	mutable := make(map[types.Object]bool)
+	mark := func(targets ...ast.Expr) {
+		for _, target := range targets {
+			if name, ok := ast.Unparen(target).(*ast.Ident); ok {
+				if variable, ok := info.Uses[name].(*types.Var); ok {
+					mutable[variable] = true
+				}
+			}
+		}
+	}
+	for node := range ast.Preorder(file) {
+		switch stmt := node.(type) {
+		case *ast.AssignStmt:
+			mark(stmt.Lhs...)
+		case *ast.RangeStmt:
+			mark(stmt.Key, stmt.Value)
+		case *ast.UnaryExpr:
+			if stmt.Op == token.AND {
+				mark(stmt.X)
+			}
+		}
+	}
+	return mutable
+}
+
 // Later operands can write a stored outcome through a function literal.
 func (c flakeChecks) outcomeReassigned(object types.Object, later []ast.Expr) bool {
 	for _, operand := range later {

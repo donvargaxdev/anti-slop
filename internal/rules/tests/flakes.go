@@ -23,6 +23,7 @@ type flakeChecks struct {
 	returns      *flakeReturns
 	callOutcomes map[*ast.CallExpr]outcomePolarity
 	sharedErrors map[types.Object]bool
+	mutableVars  map[types.Object]bool
 	retry        *retryScan
 	successCase  bool
 	retryHeader  bool
@@ -74,6 +75,7 @@ func runFlakes(pass *analysis.Pass) (any, error) {
 	}
 	visitTestFiles(pass, func(file *ast.File) {
 		checks.sharedErrors = sharedErrorVariables(info, file)
+		checks.mutableVars = mutableVariables(info, file)
 		checks.walk(file, func(checks flakeChecks, node, parent ast.Node) bool {
 			checks.reportFinding(node, parent, reportOnce)
 			return true
@@ -202,6 +204,12 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 			body := c.fork()
 			body.failureGuard = false
 			body.returns = nil
+			// A delayed closure can observe later writes to its captures.
+			for object := range body.outcomes {
+				if body.mutableVars[object] {
+					delete(body.outcomes, object)
+				}
+			}
 			body.walk(stmt.Body, visit)
 			return false
 		case *ast.CallExpr:
@@ -262,8 +270,14 @@ func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit
 	}
 	var returns flakeReturns
 	body.returns = &returns
+	results := signature.Results()
+	for result := range results.Variables() {
+		if result.Name() != "" {
+			body.storeObjectOutcome(result, nilError)
+		}
+	}
 	if booleanResult(c.info, call) {
-		returns.result = signature.Results().At(0)
+		returns.result = results.At(0)
 		if returns.result.Name() != "" {
 			body.storeObjectOutcome(returns.result, constantFalse)
 		}
@@ -271,13 +285,15 @@ func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit
 	body.walk(literal.Body, visit)
 	if returns.result != nil {
 		c.callOutcomes[call] = returns.booleanOutcome()
-		delete(returns.flow.outcomes, returns.result)
 	}
 	// Explicit returns and fallthrough both resume the caller. A testing
 	// termination inside the literal may belong to a different test.
 	if outcomes := mergeOutcomes(returns.flow.outcomes, body.outcomes); outcomes != nil {
 		for param := range params.Variables() {
 			delete(outcomes, param)
+		}
+		for result := range results.Variables() {
+			delete(outcomes, result)
 		}
 		c.outcomes = outcomes
 	}

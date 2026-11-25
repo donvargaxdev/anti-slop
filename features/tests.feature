@@ -256,6 +256,25 @@ Feature: Test reliability
           }
       }
 
+      func TestDeferredSkipAfterOverwrite(t *testing.T) {
+          failed := t.Failed()
+          defer func() {
+              if failed {
+                  t.Skip("optional")
+              }
+          }()
+          failed = true
+      }
+
+      func TestSkipWithZeroNamedError(t *testing.T) {
+          _ = func() (err error) {
+              if err != nil {
+                  t.Skip("optional")
+              }
+              return
+          }()
+      }
+
       func check() error { return nil }
       """
     When anti-slop runs with "tests ./..."
