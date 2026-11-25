@@ -462,3 +462,31 @@ func TestFailureRecordedOnFinalIteration(t *test.T) {
 		t.Skip("failed") // want "skipping after a failure"
 	}
 }
+
+func TestSkipOnComparedFailure(t *test.T) {
+	if t.Failed() == true {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnComparedSubtestFailure(t *test.T) {
+	if t.Run("body", func(t *test.T) {}) == false {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestRetryUntilComparedSuccess(t *test.T) {
+	for range 3 { // want "retrying a check or test body"
+		if t.Run("body", func(t *test.T) {}) == true {
+			break
+		}
+	}
+}
+
+func TestSkipOnStoredComparedFailure(t *test.T) {
+	const succeeded = true
+	failed := succeeded != t.Run("body", func(t *test.T) {})
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}

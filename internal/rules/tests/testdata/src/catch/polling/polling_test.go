@@ -534,3 +534,34 @@ func TestPollUntilSwitchFallthrough(t *testing.T) {
 		}
 	}
 }
+
+func TestReceiveAfterNonTerminatingCall(t *testing.T) {
+	ch := After(Second)
+	t.Error("nonfatal")
+	for range 3 { // want "polling against the wall clock"
+		<-ch
+	}
+}
+
+func TestReceiveAfterDeferredFatal(t *testing.T) {
+	ch := After(Second)
+	defer t.Fatal("deferred")
+	for range 3 { // want "polling against the wall clock"
+		<-ch
+	}
+}
+
+func TestDeadlineInFatalArgument(t *testing.T) {
+	for range 3 { // want "polling against the wall clock"
+		t.Fatal(<-After(Second))
+	}
+}
+
+func TestClockGuardEndingWithSkip(t *testing.T) {
+	started := Now()
+	for { // want "polling against the wall clock"
+		if Since(started) > Second {
+			t.Skip("timeout")
+		}
+	}
+}

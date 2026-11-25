@@ -448,3 +448,31 @@ func TestClockSwitchWithLocalBreak(t *testing.T) {
 		}
 	}
 }
+
+func TestReceiveAfterFatalBranch(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	if testing.Short() {
+		ch = ready
+	} else {
+		t.Fatal("unsupported")
+	}
+	for range 3 {
+		<-ch
+	}
+}
+
+func TestReceiveAfterSkippedBranch(t *testing.T) {
+	ready := make(chan time.Time)
+	close(ready)
+	ch := time.After(time.Second)
+	if testing.Short() {
+		ch = ready
+	} else {
+		t.SkipNow()
+	}
+	for range 3 {
+		<-ch
+	}
+}

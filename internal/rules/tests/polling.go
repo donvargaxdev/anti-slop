@@ -148,6 +148,12 @@ func (scan *pollingScan) visit(node ast.Node) bool {
 			scan.record(result)
 		}
 		scan.tracked = nil
+	case *ast.ExprStmt:
+		if !endsTest(scan.info, expr.X) {
+			return true
+		}
+		scan.record(expr.X)
+		scan.tracked = nil
 	case *ast.BranchStmt:
 		switch expr.Tok {
 		case token.BREAK, token.CONTINUE:
@@ -430,14 +436,16 @@ func pollsInBody(info *types.Info, body *ast.BlockStmt, receives map[*ast.UnaryE
 		case *ast.BranchStmt:
 			found = expr.Tok == token.BREAK && breaksLoop(info, expr, body, parents) && guardedByClock(parents, clockGuards)
 		case *ast.ExprStmt:
-			if call, ok := ast.Unparen(expr.X).(*ast.CallExpr); ok &&
-				testingMethod(info, call, "Fatal", "Fatalf", "FailNow") {
-				found = guardedByClock(parents, clockGuards)
-			}
+			found = endsTest(info, expr.X) && guardedByClock(parents, clockGuards)
 		}
 		return !found
 	})
 	return found
+}
+
+func endsTest(info *types.Info, expr ast.Expr) bool {
+	call, ok := ast.Unparen(expr).(*ast.CallExpr)
+	return ok && testingMethod(info, call, "Fatal", "Fatalf", "FailNow", "Skip", "Skipf", "SkipNow")
 }
 
 func guardedByClock(parents []ast.Node, clockGuards map[ast.Node]bool) bool {

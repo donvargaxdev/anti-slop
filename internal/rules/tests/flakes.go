@@ -2,6 +2,7 @@ package tests
 
 import (
 	"go/ast"
+	"go/constant"
 	"go/token"
 	"go/types"
 	"maps"
@@ -309,6 +310,13 @@ func (c flakeChecks) constrainOutcome(condition ast.Expr, possible outcomePolari
 		if expr.Op == token.NOT {
 			c.constrainOutcome(expr.X, possible^(failsWhenTrue|failsWhenFalse))
 		}
+	case *ast.BinaryExpr:
+		if operand, same := booleanComparison(c.info, expr); operand != nil {
+			if !same {
+				possible ^= failsWhenTrue | failsWhenFalse
+			}
+			c.constrainOutcome(operand, possible)
+		}
 	}
 }
 
@@ -411,6 +419,9 @@ func (c flakeChecks) failureComparison(expr *ast.BinaryExpr, failure bool, attem
 		}
 		return left && right
 	case token.EQL, token.NEQ:
+		if operand, same := booleanComparison(c.info, expr); operand != nil {
+			return c.failureCondition(operand, failure == same, attempt)
+		}
 		if (expr.Op == token.NEQ) != failure {
 			return false
 		}
@@ -418,6 +429,24 @@ func (c flakeChecks) failureComparison(expr *ast.BinaryExpr, failure bool, attem
 			errorComparedWithNil(c.info, expr.Y, expr.X, attempt)
 	}
 	return false
+}
+
+// booleanComparison returns the operand tested against a boolean constant and
+// whether the comparison has the same truth value as that operand.
+func booleanComparison(info *types.Info, expr *ast.BinaryExpr) (ast.Expr, bool) {
+	if expr.Op != token.EQL && expr.Op != token.NEQ {
+		return nil, false
+	}
+	operand := expr.X
+	value := info.Types[expr.Y].Value
+	if value == nil {
+		operand = expr.Y
+		value = info.Types[expr.X].Value
+	}
+	if value == nil || value.Kind() != constant.Bool {
+		return nil, false
+	}
+	return operand, constant.BoolVal(value) == (expr.Op == token.EQL)
 }
 
 func errorComparedWithNil(info *types.Info, value, other ast.Expr, attempt ast.Node) bool {

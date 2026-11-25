@@ -420,3 +420,32 @@ func singleAttempt() {
 		break
 	}
 }
+
+func TestComparedSuccess(t *testing.T) {
+	if !t.Failed() == true {
+		t.Skip("optional")
+	}
+	if false != t.Run("body", func(t *testing.T) {}) {
+		t.Skip("optional")
+	}
+}
+
+func TestComparedFailureLeavesNoFailedOutcome(t *testing.T) {
+	failed := t.Failed()
+	if false != failed {
+		return
+	}
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestComparedSuccessLeavesNoFailedOutcome(t *testing.T) {
+	ok := t.Run("body", func(t *testing.T) {})
+	if ok == false {
+		return
+	}
+	if !ok {
+		t.Skip("optional")
+	}
+}
