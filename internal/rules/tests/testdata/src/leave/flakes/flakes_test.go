@@ -1014,3 +1014,16 @@ func TestFailFastInPost(t *testing.T) {
 		}
 	}
 }
+
+func TestSkipOnUnrelatedOutcomeReturnedByImmediateCall(t *testing.T) {
+	if func() bool {
+		_ = t.Failed()
+		return testing.Short()
+	}() {
+		t.Skip("short mode")
+	}
+	passed := func() bool { return !t.Failed() }()
+	if passed {
+		t.Skip("passed")
+	}
+}

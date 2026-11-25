@@ -37,7 +37,7 @@ type pollingScan struct {
 	dependsOn     func(ast.Expr, map[types.Object]bool) bool
 	receives      map[*ast.UnaryExpr]bool
 	clockGuards   map[ast.Node]bool
-	clockCalls    map[*ast.CallExpr]bool
+	callResults   map[*ast.CallExpr]bool
 	target        *branchTarget[pollingFlow]
 	continuations *pollingContinuations
 	returns       *pollingFlow
@@ -66,13 +66,15 @@ type branchTarget[T any] struct {
 }
 
 func deadlineReceives(pass *analysis.Pass) map[*ast.UnaryExpr]bool {
+	callResults := make(map[*ast.CallExpr]bool)
 	scan := pollingScan{
 		info:        pass.TypesInfo,
 		pollingFlow: pollingFlow{tracked: make(map[types.Object]bool)},
 		dependsOn: func(expr ast.Expr, tracked map[types.Object]bool) bool {
-			return afterDeadline(pass.TypesInfo, expr, tracked)
+			return afterDeadline(pass.TypesInfo, expr, tracked, callResults)
 		},
-		receives: make(map[*ast.UnaryExpr]bool),
+		receives:    make(map[*ast.UnaryExpr]bool),
+		callResults: callResults,
 	}
 	visitTestFiles(pass, func(file *ast.File) {
 		for _, decl := range file.Decls {
@@ -230,10 +232,13 @@ func (scan *pollingScan) visit(node, parent ast.Node) bool {
 			scan.store(scan.info.ObjectOf(name), values[i])
 		}
 	case *ast.UnaryExpr:
-		if scan.receives != nil && expr.Op == token.ARROW && afterDeadline(scan.info, expr.X, scan.tracked) {
+		if scan.receives == nil || expr.Op != token.ARROW {
+			return true
+		}
+		scan.record(expr.X)
+		if scan.dependsOn(expr.X, scan.tracked) {
 			scan.receives[expr] = true
 		}
-		return true
 	default:
 		return true
 	}
@@ -260,7 +265,7 @@ func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.Fu
 		}
 	}
 	var result *types.Var
-	if scan.clockCalls != nil && signature.Results().Len() == 1 {
+	if signature.Results().Len() == 1 {
 		result = signature.Results().At(0)
 	}
 	var returns pollingFlow
@@ -268,7 +273,7 @@ func (scan *pollingScan) recordImmediateCall(call *ast.CallExpr, literal *ast.Fu
 	// Explicit returns and fallthrough both resume the caller.
 	resumed := mergePollingFlows(body.pollingFlow, returns)
 	if result != nil {
-		scan.clockCalls[call] = returns.tracked[result]
+		scan.callResults[call] = returns.tracked[result]
 		delete(resumed.tracked, result)
 	}
 	if resumed.tracked == nil {
@@ -355,9 +360,9 @@ func (scan *pollingScan) recordSelect(body *ast.BlockStmt, label types.Object) {
 
 func (scan *pollingScan) recordClockGuard(expr ast.Expr) bool {
 	// Read incoming values before the guard runs and returned values after it runs.
-	readsClock := scan.clockCalls != nil && usesClockValue(scan.info, expr, scan.tracked, nil)
+	readsClock := scan.clockGuards != nil && usesClockValue(scan.info, expr, scan.tracked, nil)
 	scan.record(expr)
-	return readsClock || scan.clockCalls != nil && usesClockValue(scan.info, expr, nil, scan.clockCalls)
+	return readsClock || scan.clockGuards != nil && usesClockValue(scan.info, expr, nil, scan.callResults)
 }
 
 func (scan *pollingScan) recordSwitch(body *ast.BlockStmt, label types.Object, tagReadsClock bool) {
@@ -530,15 +535,15 @@ func pollsInLoop(info *types.Info, node ast.Node, parents []ast.Node, receives m
 	}
 	// Start with an empty state so a fixed snapshot taken before the loop does
 	// not count as polling. Record each guard with the values that reach it.
-	clockCalls := make(map[*ast.CallExpr]bool)
+	callResults := make(map[*ast.CallExpr]bool)
 	scan := pollingScan{
 		info:        info,
 		pollingFlow: pollingFlow{tracked: make(map[types.Object]bool)},
 		dependsOn: func(expr ast.Expr, tracked map[types.Object]bool) bool {
-			return usesClockValue(info, expr, tracked, clockCalls)
+			return usesClockValue(info, expr, tracked, callResults)
 		},
 		clockGuards:   make(map[ast.Node]bool),
-		clockCalls:    clockCalls,
+		callResults:   callResults,
 		continuations: &pollingContinuations{},
 	}
 	clockInHeader := false
@@ -563,10 +568,10 @@ func usesClockValue(info *types.Info, expr ast.Expr, tracked map[types.Object]bo
 	})
 }
 
-func afterDeadline(info *types.Info, expr ast.Expr, deadlines map[types.Object]bool) bool {
+func afterDeadline(info *types.Info, expr ast.Expr, deadlines map[types.Object]bool, calls map[*ast.CallExpr]bool) bool {
 	switch value := ast.Unparen(expr).(type) {
 	case *ast.CallExpr:
-		return packageCall(info, value, "time", "After")
+		return calls[value] || packageCall(info, value, "time", "After")
 	case *ast.Ident:
 		return deadlines[info.ObjectOf(value)]
 	}

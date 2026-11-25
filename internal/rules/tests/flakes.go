@@ -19,11 +19,12 @@ var Flakes = &analysis.Analyzer{
 type flakeChecks struct {
 	info *types.Info
 	flakeFlow
-	target      *branchTarget[flakeFlow]
-	returns     *flakeFlow
-	retry       *retryScan
-	successCase bool
-	retryHeader bool
+	target       *branchTarget[flakeFlow]
+	returns      *flakeReturns
+	callOutcomes map[*ast.CallExpr]outcomePolarity
+	retry        *retryScan
+	successCase  bool
+	retryHeader  bool
 }
 
 type flakeFlow struct {
@@ -32,6 +33,11 @@ type flakeFlow struct {
 	failureGuard bool
 	// A failed check can reach this point during the retry scan.
 	retryFailure bool
+}
+
+type flakeReturns struct {
+	flow   flakeFlow
+	result *types.Var
 }
 
 type outcomePolarity uint8
@@ -45,7 +51,11 @@ const (
 
 func runFlakes(pass *analysis.Pass) (any, error) {
 	info := pass.TypesInfo
-	checks := flakeChecks{info: info, flakeFlow: flakeFlow{outcomes: make(map[types.Object]outcomePolarity)}}
+	checks := flakeChecks{
+		info:         info,
+		flakeFlow:    flakeFlow{outcomes: make(map[types.Object]outcomePolarity)},
+		callOutcomes: make(map[*ast.CallExpr]outcomePolarity),
+	}
 	reported := make(map[token.Pos]bool)
 	reportOnce := func(node ast.Node, reason string) {
 		if !reported[node.Pos()] {
@@ -156,7 +166,10 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 				c.walk(result, visit)
 			}
 			if c.returns != nil {
-				*c.returns = mergeFlakeFlows(*c.returns, c.flakeFlow)
+				if c.returns.result != nil && len(stmt.Results) == 1 && c.outcomes != nil {
+					c.storeObjectOutcome(c.returns.result, c.booleanOutcome(stmt.Results[0]))
+				}
+				c.returns.flow = mergeFlakeFlows(c.returns.flow, c.flakeFlow)
 			}
 			c.outcomes = nil
 			return false
@@ -231,12 +244,19 @@ func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit
 			body.outcomes[params.At(i)] = outcomes[i]
 		}
 	}
-	var returns flakeFlow
+	var returns flakeReturns
 	body.returns = &returns
+	if booleanResult(c.info, call) {
+		returns.result = signature.Results().At(0)
+	}
 	body.walk(literal.Body, visit)
+	if returns.result != nil {
+		c.callOutcomes[call] = returns.flow.outcomes[returns.result]
+		delete(returns.flow.outcomes, returns.result)
+	}
 	// Explicit returns and fallthrough both resume the caller. A testing
 	// termination inside the literal may belong to a different test.
-	if outcomes := mergeOutcomes(returns.outcomes, body.outcomes); outcomes != nil {
+	if outcomes := mergeOutcomes(returns.flow.outcomes, body.outcomes); outcomes != nil {
 		for param := range params.Variables() {
 			delete(outcomes, param)
 		}
@@ -495,16 +515,7 @@ func (c *flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int, vis
 			}
 			continue
 		}
-		if c.isShortMode(value) {
-			outcomes[i] = shortMode
-			continue
-		}
-		if c.failureCondition(value, true, nil) {
-			outcomes[i] |= failsWhenTrue
-		}
-		if c.failureCondition(value, false, nil) {
-			outcomes[i] |= failsWhenFalse
-		}
+		outcomes[i] = c.booleanOutcome(value)
 		if c.retryHeader && outcomes[i] == 0 && c.isCheckCall(value) {
 			outcomes[i] = failsWhenFalse
 		}
@@ -512,10 +523,24 @@ func (c *flakeChecks) assignmentOutcomes(values []ast.Expr, targetCount int, vis
 	return outcomes
 }
 
+func (c flakeChecks) booleanOutcome(value ast.Expr) outcomePolarity {
+	if c.isShortMode(value) {
+		return shortMode
+	}
+	var polarity outcomePolarity
+	if c.failureCondition(value, true, nil) {
+		polarity |= failsWhenTrue
+	}
+	if c.failureCondition(value, false, nil) {
+		polarity |= failsWhenFalse
+	}
+	return polarity
+}
+
 func (c flakeChecks) isShortMode(value ast.Expr) bool {
 	switch expr := ast.Unparen(value).(type) {
 	case *ast.CallExpr:
-		return packageCall(c.info, expr, "testing", "Short")
+		return c.callOutcomes[expr] == shortMode || packageCall(c.info, expr, "testing", "Short")
 	case *ast.Ident:
 		return c.outcomes[c.info.ObjectOf(expr)] == shortMode
 	case *ast.UnaryExpr:
@@ -553,7 +578,10 @@ func (c flakeChecks) storeOutcome(name *ast.Ident, polarity outcomePolarity) {
 	if name.Name == "_" {
 		return
 	}
-	object := c.info.ObjectOf(name)
+	c.storeObjectOutcome(c.info.ObjectOf(name), polarity)
+}
+
+func (c flakeChecks) storeObjectOutcome(object types.Object, polarity outcomePolarity) {
 	if polarity == 0 {
 		delete(c.outcomes, object)
 	} else {

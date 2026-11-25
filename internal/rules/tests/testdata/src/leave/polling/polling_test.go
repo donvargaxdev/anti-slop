@@ -105,6 +105,17 @@ func immediatePredicateWithFixedSnapshot() {
 	}
 }
 
+func receiveReadyChannelReturnedByImmediateCall() {
+	ready := make(chan time.Time)
+	close(ready)
+	for range 3 {
+		<-func() <-chan time.Time {
+			_ = time.After(time.Millisecond)
+			return ready
+		}()
+	}
+}
+
 func TestClockSnapshotAndUnrelatedRefresh(t *testing.T) {
 	end := time.Now()
 	for now := time.Now(); now.Before(end); now = now.Add(time.Second) {

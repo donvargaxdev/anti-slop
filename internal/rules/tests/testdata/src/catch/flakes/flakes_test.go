@@ -934,6 +934,25 @@ func TestSkipOnImmediateParameterBeforeLaterArgument(t *test.T) {
 	}(), "detail")
 }
 
+func TestSkipOnFailureReturnedByImmediateCall(t *test.T) {
+	if func() bool { return t.Failed() }() {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
+
+func TestSkipOnStoredOutcomeReturnedByImmediateCall(t *test.T) {
+	passed := func() (ok bool) {
+		if test.Short() {
+			return true
+		}
+		ok = func() bool { return t.Run("setup", body) }()
+		return
+	}()
+	if !passed {
+		t.SkipNow() // want "skipping after a failure"
+	}
+}
+
 func TestImmediateParameterAssignmentLeavesCallerFailure(t *test.T) {
 	failed := t.Failed()
 	func(failed bool) {

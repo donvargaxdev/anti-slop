@@ -17,6 +17,7 @@ func (c flakeChecks) retriesInHeader(loop *ast.ForStmt, parent ast.Node) bool {
 	}
 	// Track only fresh results that reach the condition for the next attempt.
 	c.flakeFlow = flakeFlow{outcomes: make(map[types.Object]outcomePolarity)}
+	c.callOutcomes = make(map[*ast.CallExpr]outcomePolarity)
 	c.retryHeader = true
 	iteration := c.withTarget(label, true)
 	visit := func(_ flakeChecks, _, _ ast.Node) bool { return true }
@@ -73,6 +74,12 @@ func (c flakeChecks) failureCondition(condition ast.Expr, failure bool, attempt 
 	case *ast.BinaryExpr:
 		return c.failureComparison(expr, failure, attempt)
 	case *ast.CallExpr:
+		if polarity := c.callOutcomes[expr]; polarity != 0 {
+			if failure {
+				return polarity&failsWhenTrue != 0
+			}
+			return polarity&failsWhenFalse != 0
+		}
 		switch {
 		case testingMethod(c.info, expr, "Failed"):
 			return failure && (!c.retryHeader || attempt == nil)

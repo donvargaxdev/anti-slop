@@ -718,6 +718,27 @@ func TestDeadlineInImmediatePost(t *testing.T) {
 	}
 }
 
+func TestReceiveDeadlineReturnedByImmediateCall(t *testing.T) {
+	for range 3 { // want "polling against the wall clock"
+		<-func() <-chan Time { return After(Millisecond) }()
+	}
+}
+
+func TestReceiveStoredDeadlineReturnedByImmediateCall(t *testing.T) {
+	ready := make(chan Time)
+	close(ready)
+	deadline := func() (ch <-chan Time) {
+		if testing.Short() {
+			return ready
+		}
+		ch = After(Millisecond)
+		return
+	}()
+	for range 3 { // want "polling against the wall clock"
+		<-deadline
+	}
+}
+
 func TestClockGuardInsideImmediateCall(t *testing.T) {
 	start := Now()
 	for range 3 { // want "polling against the wall clock"
