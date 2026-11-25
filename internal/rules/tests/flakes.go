@@ -125,15 +125,11 @@ func (c *flakeChecks) walk(root ast.Node, visit func(flakeChecks, ast.Node, ast.
 		switch stmt := node.(type) {
 		case *ast.ForStmt:
 			c.walk(stmt.Init, visit)
-			c.walkLoop(label, stmt.Body, stmt.Post, forBounds(c.info, stmt.Cond), visit, func(iteration *flakeChecks) {
-				iteration.walk(stmt.Cond, visit)
-				iteration.failureGuard = iteration.failureGuard || iteration.failureCondition(stmt.Cond, true, nil)
-				iteration.constrainOutcome(stmt.Cond, failsWhenTrue)
-			})
+			c.walkLoop(label, stmt.Body, stmt.Cond, stmt.Post, forBounds(c.info, stmt.Cond), visit, nil)
 			return false
 		case *ast.RangeStmt:
 			c.walk(stmt.X, visit)
-			c.walkLoop(label, stmt.Body, nil, rangeBounds(c.info, stmt.X), visit, func(iteration *flakeChecks) {
+			c.walkLoop(label, stmt.Body, nil, nil, rangeBounds(c.info, stmt.X), visit, func(iteration *flakeChecks) {
 				for _, target := range [...]ast.Expr{stmt.Key, stmt.Value} {
 					iteration.walk(target, visit)
 					if name, ok := ast.Unparen(target).(*ast.Ident); ok {
@@ -295,14 +291,19 @@ func (c *flakeChecks) recordBranch(stmt *ast.BranchStmt) {
 	c.outcomes = nil
 }
 
-func (c *flakeChecks) walkLoop(label types.Object, body *ast.BlockStmt, post ast.Stmt, bounds loopBounds, visit func(flakeChecks, ast.Node, ast.Node) bool, beforeBody func(*flakeChecks)) {
+func (c *flakeChecks) walkLoop(label types.Object, body *ast.BlockStmt, condition ast.Expr, post ast.Stmt, bounds loopBounds, visit func(flakeChecks, ast.Node, ast.Node) bool, beforeBody func(*flakeChecks)) {
 	if bounds.maxIterations == 0 {
 		return
 	}
 	entry := c.withTarget(label, true)
 	for count := int64(1); ; count++ {
 		iteration := entry.fork()
-		beforeBody(iteration)
+		iteration.walk(condition, visit)
+		iteration.failureGuard = iteration.failureGuard || iteration.failureCondition(condition, true, nil)
+		iteration.constrainOutcome(condition, failsWhenTrue)
+		if beforeBody != nil {
+			beforeBody(iteration)
+		}
 		iteration.walk(body, visit)
 		// Continue runs the post statement. Break reaches the next statement directly.
 		iteration.flakeFlow = mergeFlakeFlows(iteration.flakeFlow, entry.target.continues)
@@ -310,11 +311,14 @@ func (c *flakeChecks) walkLoop(label types.Object, body *ast.BlockStmt, post ast
 		// The next iteration can also start with values from the first entry.
 		next := mergeFlakeFlows(entry.fork().flakeFlow, iteration.flakeFlow)
 		if count == bounds.maxIterations || maps.Equal(entry.outcomes, next.outcomes) {
-			exits := mergeFlakeFlows(iteration.flakeFlow, entry.target.breaks)
+			// Both normal exits require a false condition. Break bypasses it.
+			iteration.constrainOutcome(condition, failsWhenFalse)
+			exits := iteration.flakeFlow
 			if bounds.maySkip {
+				c.constrainOutcome(condition, failsWhenFalse)
 				exits = mergeFlakeFlows(exits, c.flakeFlow)
 			}
-			c.flakeFlow = exits
+			c.flakeFlow = mergeFlakeFlows(exits, entry.target.breaks)
 			return
 		}
 		entry.flakeFlow = next

@@ -890,6 +890,37 @@ func TestOptionalSkipAfterFailureLoop(t *testing.T) {
 	t.Skip("optional")
 }
 
+func TestSkipAfterLoopThatClearsFailure(t *testing.T) {
+	failed := t.Failed()
+	for failed {
+		failed = false
+	}
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipAfterLoopThatReturnsOnFailure(t *testing.T) {
+	failed := t.Failed()
+	for failed {
+		return
+	}
+	if failed {
+		t.Skip("optional")
+	}
+}
+
+func TestSkipAfterLoopThatRefreshesFailure(t *testing.T) {
+	observed := t.Failed()
+	failed := testing.Verbose()
+	for failed {
+		failed = observed
+	}
+	if failed {
+		t.Skip("optional")
+	}
+}
+
 func TestStopCheckingAtExpectedError(t *testing.T) {
 	expected := errors.New("expected")
 	for attempts := 0; attempts < 3 && check() != expected; attempts++ {

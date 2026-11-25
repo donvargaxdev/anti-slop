@@ -957,3 +957,13 @@ func TestSkipInFailureShortCircuit(t *test.T) {
 		return false
 	}()
 }
+
+func TestSkipAfterLoopBreakLeavesFailure(t *test.T) {
+	failed := t.Failed()
+	for failed {
+		break
+	}
+	if failed {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}
