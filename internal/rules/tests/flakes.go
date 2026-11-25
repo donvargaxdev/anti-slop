@@ -264,6 +264,9 @@ func (c *flakeChecks) walkImmediateCall(call *ast.CallExpr, literal *ast.FuncLit
 	body.returns = &returns
 	if booleanResult(c.info, call) {
 		returns.result = signature.Results().At(0)
+		if returns.result.Name() != "" {
+			body.storeObjectOutcome(returns.result, constantFalse)
+		}
 	}
 	body.walk(literal.Body, visit)
 	if returns.result != nil {

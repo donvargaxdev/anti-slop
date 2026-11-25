@@ -1205,3 +1205,14 @@ func TestSkipOnNamedFlagReturnedAfterFailure(t *test.T) {
 		t.Skip("failed") // want "skipping after a failure"
 	}
 }
+
+func TestSkipOnNamedFlagWithImplicitZeroValue(t *test.T) {
+	if func() (failed bool) {
+		if t.Failed() {
+			failed = true
+		}
+		return
+	}() {
+		t.Skip("failed") // want "skipping after a failure"
+	}
+}

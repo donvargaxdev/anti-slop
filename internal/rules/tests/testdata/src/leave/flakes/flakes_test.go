@@ -1314,3 +1314,14 @@ func TestSkipOnAlternatingOutcomePolarity(t *testing.T) {
 		ok = !ok
 	}
 }
+
+func TestSkipOnNamedFlagWithIndependentReason(t *testing.T) {
+	if func() (skip bool) {
+		if t.Failed() || testing.Short() {
+			skip = true
+		}
+		return
+	}() {
+		t.Skip("optional")
+	}
+}
