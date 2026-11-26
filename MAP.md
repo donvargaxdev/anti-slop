@@ -67,4 +67,5 @@ test command. Add an entry for each slice or domain; say where to look, not what
 - Start with `internal/rules/conditions/conditions.go` and its CLI-tested fixtures.
 - The command is in `internal/slices/conditions/command`. The CLI assembly binds its checker.
 - Scenarios are in `features/conditions.feature`.
-- Test with `go test ./internal/rules/conditions/...`.
+- Run the fixture checks with `go test ./cmd/anti-slop -run '^TestCompoundConditions$'`
+  and the package-loading smoke test with `go test ./internal/rules/conditions/...`.

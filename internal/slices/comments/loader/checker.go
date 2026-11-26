@@ -97,7 +97,9 @@ func ReportSources(analyzer *analysis.Analyzer) SourceReporter {
 	}
 }
 
-var reportSources = ReportSources(comments.Analyzer)
+func reportSources(ctx context.Context, fset *token.FileSet, names []string, report func(analysis.Diagnostic)) port.CheckFailure {
+	return ReportSources(comments.Analyzer)(ctx, fset, names, report)
+}
 
 // relative is name below root as a relative path, or name as it is when it
 // lies elsewhere.

@@ -161,7 +161,6 @@ func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Wri
 		ui.Classifiers = []cli.Classifier{comments.Classify}
 		return c.Comments.Run(ctx, ui, comments.Handler{Checker: a.Comments})
 	case "conditions":
-		ui.Classifiers = []cli.Classifier{conditions.Classify}
 		return c.Conditions.Run(ctx, ui, conditions.Handler{Checker: a.Conditions})
 	case "tests":
 		ui.Classifiers = []cli.Classifier{tests.Classify}

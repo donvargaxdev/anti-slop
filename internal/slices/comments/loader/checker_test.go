@@ -1,13 +1,17 @@
 package loader_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 
+	"golang.org/x/tools/go/analysis"
+
 	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
 	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port/porttest"
+	"github.com/donvargaxdev/anti-slop/internal/rules/comments"
 	"github.com/donvargaxdev/anti-slop/internal/slices/comments/loader"
 )
 
@@ -36,6 +40,22 @@ func TestTheLoaderHoldsTheContract(t *testing.T) {
 		})
 		return porttest.CheckerCase{Checker: loader.Checker{Dir: dir}, Clean: "./clean", Dirty: "./dirty", Broken: "./broken"}
 	})
+}
+
+func TestTheLoaderReturnsAnAnalyzerErrorAsACheckFailure(t *testing.T) {
+	dir := module(t, map[string]string{"p.go": "package p\n"})
+	const reason = "analysis failed"
+	original := comments.Analyzer
+	t.Cleanup(func() { comments.Analyzer = original })
+	failing := *original
+	failing.Run = func(*analysis.Pass) (any, error) { return nil, errors.New(reason) }
+	comments.Analyzer = &failing
+	checker := loader.Checker{Dir: dir}
+	got, failure := checker.Check(t.Context(), []string{"."})
+	failed, ok := failure.(*port.Failed)
+	if !ok || failed.Reason != reason || got != nil {
+		t.Errorf("Check = %v, %v, want no findings and *port.Failed with reason %q", got, failure, reason)
+	}
 }
 
 func TestTheLoaderGivesPathsBelowItsFolderAndTheirPlace(t *testing.T) {

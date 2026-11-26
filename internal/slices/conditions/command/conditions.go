@@ -43,7 +43,7 @@ func (c CLI) Run(ctx context.Context, ui *cli.UI, h Handler) int {
 	}
 	found, failure := h.Handle(ctx, Query{Patterns: patterns})
 	if failure != nil {
-		return ui.Fail(failure, false)
+		return ui.Emit(false, []*cli.Problem{Classify(failure)})
 	}
 	for _, f := range found {
 		_, _ = fmt.Fprintln(ui.Stdout, f)
