@@ -106,7 +106,12 @@ func (m *memory) inProcessAdapters() adapters {
 	for name := range m.folders {
 		failures[name] = porttest.Unreadable(name)
 	}
-	return adapters{Files: porttest.Files{Data: m.files, Failures: failures}, Comments: checkingtest.Checker{}, Tests: checkingtest.Checker{}}
+	return adapters{
+		Files:    porttest.Files{Data: m.files, Failures: failures},
+		Comments: checkingtest.Checker{},
+		Tests:    checkingtest.Checker{},
+		Funclen:  checkingtest.Checker{},
+	}
 }
 
 // cleanEnv unsets every ANTI_SLOP_ variable and sets the run's, and
