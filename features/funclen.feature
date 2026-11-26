@@ -3,7 +3,7 @@ Feature: Function length
   anti-slop funclen reports bodies with more than 70 physical lines between
   their brace lines. Generated files and table-driven case data are excluded.
 
-  @wip @ID-FUNCLEN-01 @funclen-rule @binary-only
+  @ID-FUNCLEN-01 @funclen-rule @binary-only
   Scenario: funclen reports a long function and exits 0
     Given the file "go.mod" holds:
       """
@@ -95,13 +95,13 @@ Feature: Function length
     And its standard output is one line
     And its error output is empty
 
-  @wip @ID-FUNCLEN-02 @funclen-rule
+  @ID-FUNCLEN-02 @funclen-rule
   Scenario: funclen rejects a pattern that go list would take for a flag
     When anti-slop runs with "funclen -- -x"
     Then it exits with code 80
     And its error output says "-x"
 
-  @wip @ID-FUNCLEN-03 @funclen-rule @binary-only
+  @ID-FUNCLEN-03 @funclen-rule @binary-only
   Scenario: funclen reports when patterns match no package
     Given the file "go.mod" holds:
       """

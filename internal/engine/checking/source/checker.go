@@ -1,6 +1,5 @@
-// Package loader is the comments slice's adapter of its port: it loads the
-// packages a pattern names with go list and runs the rule over their syntax.
-package loader
+// Package source loads and checks the original Go source files of packages.
+package source
 
 import (
 	"context"
@@ -14,13 +13,15 @@ import (
 	"golang.org/x/tools/go/packages"
 
 	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
-	"github.com/donvargaxdev/anti-slop/internal/rules/comments"
 )
 
 // Checker is the port's implementation over the go command. Dir is the folder
 // patterns are read in and paths are given relative to; "" is the working
 // folder.
-type Checker struct{ Dir string }
+type Checker struct {
+	Dir    string
+	Report func(*token.FileSet, []*ast.File, func(analysis.Diagnostic))
+}
 
 // Check loads the packages of patterns with their tests, parses the source
 // files they list, and gives each finding once. The original source preserves
@@ -52,7 +53,7 @@ func (c Checker) Check(ctx context.Context, patterns []string) (found []port.Fin
 		if len(pkg.Errors) > 0 {
 			return nil, &port.Failed{Reason: pkg.Errors[0].Error()}
 		}
-		failure := reportSources(ctx, fset, pkg.GoFiles, func(d analysis.Diagnostic) {
+		failure := c.reportSources(ctx, fset, pkg.GoFiles, func(d analysis.Diagnostic) {
 			at := fset.PositionFor(d.Pos, false)
 			found = append(found, port.Finding{
 				Path: relative(root, at.Filename), Line: at.Line, Col: at.Column, Rule: d.Category, Reason: d.Message,
@@ -65,7 +66,7 @@ func (c Checker) Check(ctx context.Context, patterns []string) (found []port.Fin
 	return port.Merge(nil, found), nil
 }
 
-func reportSources(ctx context.Context, fset *token.FileSet, names []string, report func(analysis.Diagnostic)) port.CheckFailure {
+func (c Checker) reportSources(ctx context.Context, fset *token.FileSet, names []string, report func(analysis.Diagnostic)) port.CheckFailure {
 	for _, name := range names {
 		if ctx.Err() != nil {
 			break
@@ -74,7 +75,7 @@ func reportSources(ctx context.Context, fset *token.FileSet, names []string, rep
 		if err != nil {
 			return &port.Failed{Reason: err.Error()}
 		}
-		comments.Report(fset, []*ast.File{file}, report)
+		c.Report(fset, []*ast.File{file}, report)
 	}
 	if ctx.Err() != nil {
 		return &port.Cancelled{}

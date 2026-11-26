@@ -32,12 +32,15 @@ import (
 
 	"github.com/donvargaxdev/anti-slop/internal/cli"
 	checking "github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/source"
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/disk"
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/port"
+	commentsrule "github.com/donvargaxdev/anti-slop/internal/rules/comments"
+	funclenrule "github.com/donvargaxdev/anti-slop/internal/rules/funclen"
 	comments "github.com/donvargaxdev/anti-slop/internal/slices/comments/command"
-	commentsloader "github.com/donvargaxdev/anti-slop/internal/slices/comments/loader"
 	count "github.com/donvargaxdev/anti-slop/internal/slices/count/command"
 	"github.com/donvargaxdev/anti-slop/internal/slices/count/stdin"
+	funclen "github.com/donvargaxdev/anti-slop/internal/slices/funclen/command"
 	tests "github.com/donvargaxdev/anti-slop/internal/slices/tests/command"
 	testsloader "github.com/donvargaxdev/anti-slop/internal/slices/tests/loader"
 	"github.com/donvargaxdev/anti-slop/internal/version"
@@ -57,6 +60,7 @@ type commandLine struct {
 	Count      count.CLI      `cmd:"" help:"Count the lines and words of a file, or of standard input."`
 	Comments   comments.CLI   `cmd:"" help:"Report the Go comments that no tool reads."`
 	Tests      tests.CLI      `cmd:"" help:"Report sleeps and raw environment changes in Go test files."`
+	Funclen    funclen.CLI    `cmd:"" help:"Report Go function bodies longer than 70 lines."`
 	Version    cli.Version    `cmd:"" help:"Print the version and the commit it was built from."`
 	Completion cli.Completion `cmd:"" help:"Print a shell completion script."`
 	Complete   struct{}       `cmd:"" name:"__complete" hidden:""`
@@ -86,11 +90,17 @@ type adapters struct {
 	Files    port.Files
 	Comments checking.Checker
 	Tests    checking.Checker
+	Funclen  checking.Checker
 }
 
 // diskAdapters is every port bound to the real adapter.
 func diskAdapters() adapters {
-	return adapters{Files: disk.Files{}, Comments: commentsloader.Checker{}, Tests: testsloader.Checker{}}
+	return adapters{
+		Files:    disk.Files{},
+		Comments: source.Checker{Report: commentsrule.Report},
+		Tests:    testsloader.Checker{},
+		Funclen:  source.Checker{Report: funclenrule.Report},
+	}
 }
 
 // run parses args and runs what they name, returning the exit code. With no
@@ -154,6 +164,9 @@ func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Wri
 	case "tests":
 		ui.Classifiers = []cli.Classifier{tests.Classify}
 		return c.Tests.Run(ctx, ui, tests.Handler{Checker: a.Tests})
+	case "funclen":
+		ui.Classifiers = []cli.Classifier{funclen.Classify}
+		return c.Funclen.Run(ctx, ui, funclen.Handler{Checker: a.Funclen})
 	case "version":
 		// What --version prints, as kong prints it, or with --json the
 		// version and commit that text is made of.

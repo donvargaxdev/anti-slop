@@ -45,8 +45,9 @@ The `comments` command is the second slice, `internal/slices/comments`, and runs
   The graph check lets only an adapter import a rule, and `cmd` assemble one.
 - `internal/engine/checking/port` declares the shared `Checker`, `Finding` and the sealed failures
   `Failed` and `Cancelled`. Its `porttest` holds the fake and the contract suite for the adapters.
-- `loader` is the adapter: it loads the patterns with go list through `go/packages` and runs the
-  rule over each package's syntax, tests included, each finding once.
+- `internal/engine/checking/source` loads the patterns with go list through `go/packages` and
+  runs a syntax rule over each package's original files, tests included, reporting each finding
+  once. The `funclen` slice uses the same adapter.
 - `command` is the command: `Patterns` is the checked argument (no empty or NUL pattern, none a flag
   or a loader query), `Run` prints each finding as `path:line:col: comments: <reason>` and exits 0,
   since the rule only reports, and `Classify` gives the failures their problems.
