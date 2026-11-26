@@ -40,6 +40,8 @@ import (
 	"github.com/donvargaxdev/anti-slop/internal/slices/count/stdin"
 	tests "github.com/donvargaxdev/anti-slop/internal/slices/tests/command"
 	testsloader "github.com/donvargaxdev/anti-slop/internal/slices/tests/loader"
+	unitslast "github.com/donvargaxdev/anti-slop/internal/slices/unitslast/command"
+	unitslastloader "github.com/donvargaxdev/anti-slop/internal/slices/unitslast/loader"
 	"github.com/donvargaxdev/anti-slop/internal/version"
 )
 
@@ -57,6 +59,7 @@ type commandLine struct {
 	Count      count.CLI      `cmd:"" help:"Count the lines and words of a file, or of standard input."`
 	Comments   comments.CLI   `cmd:"" help:"Report the Go comments that no tool reads."`
 	Tests      tests.CLI      `cmd:"" help:"Report sleeps and raw environment changes in Go test files."`
+	Unitslast  unitslast.CLI  `cmd:"" help:"Report Go declarations with a leading unit or qualifier."`
 	Version    cli.Version    `cmd:"" help:"Print the version and the commit it was built from."`
 	Completion cli.Completion `cmd:"" help:"Print a shell completion script."`
 	Complete   struct{}       `cmd:"" name:"__complete" hidden:""`
@@ -83,14 +86,18 @@ func main() {
 // porttest's fakes (scenarios_test.go), and TestEveryPortIsBoundOnDiskAndInProcess
 // holds both to every field, so a new port is bound in each before it passes.
 type adapters struct {
-	Files    port.Files
-	Comments checking.Checker
-	Tests    checking.Checker
+	Files     port.Files
+	Comments  checking.Checker
+	Tests     checking.Checker
+	Unitslast checking.Checker
 }
 
 // diskAdapters is every port bound to the real adapter.
 func diskAdapters() adapters {
-	return adapters{Files: disk.Files{}, Comments: commentsloader.Checker{}, Tests: testsloader.Checker{}}
+	return adapters{
+		Files: disk.Files{}, Comments: commentsloader.Checker{}, Tests: testsloader.Checker{},
+		Unitslast: unitslastloader.Checker{},
+	}
 }
 
 // run parses args and runs what they name, returning the exit code. With no
@@ -154,6 +161,9 @@ func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Wri
 	case "tests":
 		ui.Classifiers = []cli.Classifier{tests.Classify}
 		return c.Tests.Run(ctx, ui, tests.Handler{Checker: a.Tests})
+	case "unitslast":
+		ui.Classifiers = []cli.Classifier{unitslast.Classify}
+		return c.Unitslast.Run(ctx, ui, unitslast.Handler{Checker: a.Unitslast})
 	case "version":
 		// What --version prints, as kong prints it, or with --json the
 		// version and commit that text is made of.
