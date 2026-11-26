@@ -1,5 +1,4 @@
-// Package loader is the comments slice's adapter of its port: it loads the
-// packages a pattern names with go list and runs the rule over their syntax.
+// Package loader loads Go packages for rules that only need their syntax.
 package loader
 
 import (
@@ -19,8 +18,14 @@ import (
 
 // Checker is the port's implementation over the go command. Dir is the folder
 // patterns are read in and paths are given relative to; "" is the working
-// folder.
-type Checker struct{ Dir string }
+// folder. A nil Report selects the comments rule.
+type Checker struct {
+	Dir    string
+	Report SourceReporter
+}
+
+// SourceReporter checks the source files listed for one package.
+type SourceReporter func(context.Context, *token.FileSet, []string, func(analysis.Diagnostic)) port.CheckFailure
 
 // Check loads the packages of patterns with their tests, parses the source
 // files they list, and gives each finding once. The original source preserves
@@ -48,11 +53,15 @@ func (c Checker) Check(ctx context.Context, patterns []string) (found []port.Fin
 		return nil, &port.Failed{Reason: "the patterns match no package"}
 	}
 	root, _ := filepath.Abs(c.Dir)
+	checkSources := c.Report
+	if checkSources == nil {
+		checkSources = reportSources
+	}
 	for _, pkg := range pkgs {
 		if len(pkg.Errors) > 0 {
 			return nil, &port.Failed{Reason: pkg.Errors[0].Error()}
 		}
-		failure := reportSources(ctx, fset, pkg.GoFiles, func(d analysis.Diagnostic) {
+		failure := checkSources(ctx, fset, pkg.GoFiles, func(d analysis.Diagnostic) {
 			at := fset.PositionFor(d.Pos, false)
 			found = append(found, port.Finding{
 				Path: relative(root, at.Filename), Line: at.Line, Col: at.Column, Rule: d.Category, Reason: d.Message,
@@ -65,22 +74,30 @@ func (c Checker) Check(ctx context.Context, patterns []string) (found []port.Fin
 	return port.Merge(nil, found), nil
 }
 
-func reportSources(ctx context.Context, fset *token.FileSet, names []string, report func(analysis.Diagnostic)) port.CheckFailure {
-	for _, name := range names {
+// ReportSources adapts a rule that works on source syntax into a SourceReporter.
+func ReportSources(analyzer *analysis.Analyzer) SourceReporter {
+	return func(ctx context.Context, fset *token.FileSet, names []string, report func(analysis.Diagnostic)) port.CheckFailure {
+		for _, name := range names {
+			if ctx.Err() != nil {
+				break
+			}
+			file, err := parser.ParseFile(fset, name, nil, parser.ParseComments|parser.SkipObjectResolution)
+			if err != nil {
+				return &port.Failed{Reason: err.Error()}
+			}
+			pass := &analysis.Pass{Analyzer: analyzer, Fset: fset, Files: []*ast.File{file}, Report: report}
+			if _, err := analyzer.Run(pass); err != nil {
+				return &port.Failed{Reason: err.Error()}
+			}
+		}
 		if ctx.Err() != nil {
-			break
+			return &port.Cancelled{}
 		}
-		file, err := parser.ParseFile(fset, name, nil, parser.ParseComments|parser.SkipObjectResolution)
-		if err != nil {
-			return &port.Failed{Reason: err.Error()}
-		}
-		comments.Report(fset, []*ast.File{file}, report)
+		return nil
 	}
-	if ctx.Err() != nil {
-		return &port.Cancelled{}
-	}
-	return nil
 }
+
+var reportSources = ReportSources(comments.Analyzer)
 
 // relative is name below root as a relative path, or name as it is when it
 // lies elsewhere.
