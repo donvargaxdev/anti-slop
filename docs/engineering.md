@@ -26,6 +26,31 @@ interface, output formatting or process exit codes.
 Use the smallest structure that holds these boundaries. Do not add wrappers, ports or
 mapping code merely to make a small example resemble a larger application.
 
+## Analyzer rules
+
+Implement each rule as one `go/analysis` pass of a few hundred lines. Give it must-catch
+fixtures for violations and must-leave fixtures for accepted code. If the analyzer grows
+past about 500 lines or needs more than a few review rounds, split the work into smaller
+issues. Count only analyzer code. Fixtures, scenarios and CLI wiring are outside that limit.
+
+When an analyzer tracks what it has seen in a loop or function, model it as a state machine.
+Write an explicit table that gives the next state or a refusal for each state and event.
+Test every transition and every refusal.
+
+## Code style
+
+- Keep control flow simple. Do not use recursion.
+- Give every loop that waits on external work a bound, such as a deadline or retry limit.
+- State invariants positively and break compound conditions into named steps.
+- Handle every error.
+- Put units and qualifiers last in names, as in `timeoutSeconds` and `pathResolved`.
+- Keep functions to about 70 lines or fewer.
+- Pass options explicitly.
+
+Write code that explains itself through its names and structure. Capture the reasons for
+behavior in tests and record design decisions in [docs/decisions/](decisions/). Allow only
+comments read by a tool, as reported by the repository's `comments` rule.
+
 ## Tests
 
 Specify public behavior before implementing it. Acceptance tests call public entry points,
