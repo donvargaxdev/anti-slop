@@ -1,4 +1,4 @@
-// Package loader loads Go packages and checks their test files.
+// Package loader runs a typed analyzer on Go packages and their tests.
 package loader
 
 import (
@@ -11,10 +11,12 @@ import (
 	"golang.org/x/tools/go/packages"
 
 	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
-	"github.com/donvargaxdev/anti-slop/internal/rules/tests"
 )
 
-type Checker struct{ Dir string }
+type Checker struct {
+	Dir      string
+	Analyzer *analysis.Analyzer
+}
 
 func (c Checker) Check(ctx context.Context, patterns []string) (found []port.Finding, failure port.CheckFailure) {
 	defer func() {
@@ -43,8 +45,8 @@ func (c Checker) Check(ctx context.Context, patterns []string) (found []port.Fin
 		if len(pkg.Errors) > 0 {
 			return nil, &port.Failed{Reason: pkg.Errors[0].Error()}
 		}
-		tests.Report(&analysis.Pass{
-			Analyzer:  tests.Analyzer,
+		_, err := c.Analyzer.Run(&analysis.Pass{
+			Analyzer:  c.Analyzer,
 			Fset:      fset,
 			Files:     pkg.Syntax,
 			Pkg:       pkg.Types,
@@ -56,6 +58,9 @@ func (c Checker) Check(ctx context.Context, patterns []string) (found []port.Fin
 				})
 			},
 		})
+		if err != nil {
+			return nil, &port.Failed{Reason: err.Error()}
+		}
 	}
 	return port.Merge(nil, found), nil
 }

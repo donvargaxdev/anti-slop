@@ -57,7 +57,14 @@ test command. Add an entry for each slice or domain; say where to look, not what
 ## Test smells rule
 
 - Start with `internal/rules/tests/tests.go` and its `analysistest` fixtures.
-- Slice packages are `internal/slices/tests/command` and `loader`. The loader uses the shared
-  checker port and its contract suite under `internal/engine/checking/port`.
+- The slice is `internal/slices/tests/command`. It uses the shared typed analyzer adapter
+  at `internal/engine/checking/loader`, with its contract suite under `internal/engine/checking/port`.
 - Scenarios are in `features/tests.feature`.
-- Run `go test ./internal/rules/tests/... ./internal/slices/tests/...`.
+- Run `go test ./internal/rules/tests/... ./internal/slices/tests/... ./internal/engine/checking/loader`.
+
+## Recursion rule
+
+- Start with `internal/rules/recursion/recursion.go` and its `analysistest` fixtures.
+- The slice is `internal/slices/recursion/command`, using the shared typed analyzer adapter.
+- Scenarios are in `features/recursion.feature`.
+- Run `go test ./internal/rules/recursion/...`.

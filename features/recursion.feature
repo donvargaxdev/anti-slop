@@ -4,7 +4,7 @@ Feature: Recursion
   themselves through one to three statically resolved calls in the same package.
   Each finding occupies one line on stdout and the command exits 0.
 
-  @wip @ID-RECURSION-01 @recursion-rule @binary-only
+  @ID-RECURSION-01 @recursion-rule @binary-only
   Scenario: recursion reports each function in a cycle and exits 0
     Given the file "go.mod" holds:
       """
@@ -29,7 +29,7 @@ Feature: Recursion
     And its standard output does not say "caller"
     And its error output is empty
 
-  @wip @ID-RECURSION-02 @recursion-rule @binary-only
+  @ID-RECURSION-02 @recursion-rule @binary-only
   Scenario: recursion leaves a call chain that ends
     Given the file "go.mod" holds:
       """
@@ -49,13 +49,13 @@ Feature: Recursion
     And its standard output is empty
     And its error output is empty
 
-  @wip @ID-RECURSION-03 @recursion-rule
+  @ID-RECURSION-03 @recursion-rule
   Scenario: recursion rejects a pattern that go list would take for a flag
     When anti-slop runs with "recursion -- -x"
     Then it exits with code 80
     And its error output says "-x"
 
-  @wip @ID-RECURSION-04 @recursion-rule @binary-only
+  @ID-RECURSION-04 @recursion-rule @binary-only
   Scenario: recursion reports when packages cannot be loaded
     Given the file "go.mod" holds:
       """
