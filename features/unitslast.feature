@@ -69,3 +69,30 @@ Feature: Units and qualifiers last
     Then it exits with code 0
     And its standard output says "path:line:col: unitslast: <reason>"
     And its error output is empty
+
+  @ID-UNITSLAST-06 @unitslast-rule @binary-only
+  Scenario: unitslast recognizes binary units with their standard capitalization
+    Given the file "go.mod" holds:
+      """
+      module example.test/m
+
+      go 1.27
+      """
+    And the file "p.go" holds:
+      """
+      package p
+
+      var KiB_read int
+      var MiBReceived int
+      var GiBHTTPResponse int
+      var receivedMiB int
+      var MiByte int
+      """
+    When anti-slop runs with "unitslast ./..."
+    Then it exits with code 0
+    And its standard output lists "p.go:3:5: unitslast: move kib to the end of KiB_read"
+    And its standard output lists "p.go:4:5: unitslast: move mib to the end of MiBReceived"
+    And its standard output lists "p.go:5:5: unitslast: move gib to the end of GiBHTTPResponse"
+    And its standard output does not say "end of receivedMiB"
+    And its standard output does not say "end of MiByte"
+    And its error output is empty

@@ -10,5 +10,8 @@ var minifiedFile int
 var mstimeout int
 var MS int
 var min_ int
+var MiB int
+var MiByte int
+var receivedMiB int
 
 func read() int { return max(1, 2) }

@@ -15,3 +15,7 @@ func read(usDelay int) int {
 	msWait := usDelay + msTimeout
 	return maxLatencyMs + msWait
 }
+
+var KiB_read int
+var MiBReceived int
+var GiBHTTPResponse int

@@ -21,7 +21,10 @@ func TestReportsLeadingUnitsAndQualifiers(t *testing.T) {
 				"8:5: unitslast: move bytes to the end of BytesSent\n" +
 				"11:2: unitslast: move ns to the end of nsLatency\n" +
 				"14:11: unitslast: move us to the end of usDelay\n" +
-				"15:2: unitslast: move ms to the end of msWait\n"},
+				"15:2: unitslast: move ms to the end of msWait\n" +
+				"19:5: unitslast: move kib to the end of KiB_read\n" +
+				"20:5: unitslast: move mib to the end of MiBReceived\n" +
+				"21:5: unitslast: move gib to the end of GiBHTTPResponse\n"},
 		{"leave", ""},
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {

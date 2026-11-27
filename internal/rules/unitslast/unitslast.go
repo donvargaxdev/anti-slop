@@ -37,6 +37,13 @@ func run(pass *analysis.Pass) (any, error) {
 // In MSTimeout, the capital followed by a lowercase letter starts Timeout.
 func leadingWord(name string) string {
 	word := []rune(strings.Trim(name, "_"))
+	// The uppercase B is part of a binary unit.
+	if len(word) > 3 && (unicode.IsUpper(word[3]) || word[3] == '_') {
+		switch prefix := string(word[:3]); prefix {
+		case "KiB", "MiB", "GiB":
+			return strings.ToLower(prefix)
+		}
+	}
 	for i := 1; i < len(word); i++ {
 		if word[i] == '_' {
 			return strings.ToLower(string(word[:i]))
