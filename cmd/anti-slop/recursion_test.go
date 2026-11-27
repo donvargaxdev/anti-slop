@@ -58,7 +58,7 @@ func TestReportsRecursion(t *testing.T) {
 	writeRecursionFile(t, "catch/catch.go", recursiveSource)
 	writeRecursionFile(t, "catch/other.go", "package catch\n\nfunc c() { a() }\n")
 	writeRecursionFile(t, "leave/leave.go", cleanSource)
-	want := `catch/catch.go:3:6: recursion: direct calls itself
+	want := filepath.FromSlash(`catch/catch.go:3:6: recursion: direct calls itself
 catch/catch.go:4:6: recursion: first calls itself through a cycle
 catch/catch.go:5:6: recursion: second calls itself through a cycle
 catch/catch.go:6:6: recursion: a calls itself through a cycle
@@ -69,7 +69,7 @@ catch/catch.go:11:19: recursion: walk calls itself
 catch/catch.go:13:15: recursion: follow calls itself through a cycle
 catch/catch.go:14:15: recursion: back calls itself through a cycle
 catch/other.go:3:6: recursion: c calls itself through a cycle
-`
+`)
 	code, stdout, stderr := runRecursion(t, diskAdapters(), "./...")
 	if code != 0 || stdout != want || stderr != "" {
 		t.Errorf("recursion ./... = exit %d, stdout %q, stderr %q; want exit 0, stdout %q, and empty stderr", code, stdout, stderr, want)
@@ -103,6 +103,16 @@ func checkerContract(t *testing.T, checker port.Checker) {
 			Broken:  "./missing",
 		}
 	})
+}
+
+func TestRecursionReportsPhysicalSourcePosition(t *testing.T) {
+	recursionModule(t)
+	writeRecursionFile(t, "p.go", "package p\n\n//line virtual.go:100:20\nfunc direct() { direct() }\n")
+	want := "p.go:4:6: recursion: direct calls itself\n"
+	code, stdout, stderr := runRecursion(t, diskAdapters(), "./...")
+	if code != 0 || stdout != want || stderr != "" {
+		t.Errorf("recursion ./... = exit %d, stdout %q, stderr %q; want exit 0, stdout %q, and empty stderr", code, stdout, stderr, want)
+	}
 }
 
 func TestCheckerDiscardsFindingsOnAnalyzerFailure(t *testing.T) {
