@@ -57,6 +57,10 @@ The `internal/rules/tests` analyzer resolves standard-library calls, including r
 imports, in `_test.go` files. The `internal/rules/recursion` analyzer reports named functions
 and methods in cycles of up to three statically resolved calls within a package.
 
+The `conditions` analyzer reports an `if` or `for` condition with more than two `&&` or `||`
+operators. The CLI assembly binds it to the checker port using the same syntax adapter as
+`comments`. Its must-catch and must-leave fixtures run through the CLI.
+
 Around them:
 
 - `internal/cli` is the UI every slice shares. It imports nothing of the project's: it turns
