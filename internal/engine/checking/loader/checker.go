@@ -18,6 +18,12 @@ type Checker struct {
 	Analyzer *analysis.Analyzer
 }
 
+// WithAnalyzer configures a copy of the checker for a typed rule.
+func (c Checker) WithAnalyzer(analyzer *analysis.Analyzer) port.Checker {
+	c.Analyzer = analyzer
+	return c
+}
+
 func (c Checker) Check(ctx context.Context, patterns []string) (found []port.Finding, failure port.CheckFailure) {
 	defer func() {
 		if ctx.Err() != nil {

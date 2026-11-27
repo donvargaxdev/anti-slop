@@ -21,16 +21,32 @@ Feature: Recursion
       func second() { first() }
       func caller() { first() }
       """
+    And the file "cycle.go" holds:
+      """
+      package p
+
+      func alpha() { beta() }
+      func beta() { gamma() }
+      """
+    And the file "cycle_end.go" holds:
+      """
+      package p
+
+      func gamma() { alpha() }
+      """
     When anti-slop runs with "recursion ./..."
     Then it exits with code 0
     And its standard output lists "p.go:3:6: recursion: direct calls itself"
     And its standard output lists "p.go:4:6: recursion: first calls itself through a cycle"
     And its standard output lists "p.go:5:6: recursion: second calls itself through a cycle"
+    And its standard output lists "cycle.go:3:6: recursion: alpha calls itself through a cycle"
+    And its standard output lists "cycle.go:4:6: recursion: beta calls itself through a cycle"
+    And its standard output lists "cycle_end.go:3:6: recursion: gamma calls itself through a cycle"
     And its standard output does not say "caller"
     And its error output is empty
 
   @ID-RECURSION-02 @recursion-rule @binary-only
-  Scenario: recursion leaves a call chain that ends
+  Scenario: recursion leaves a call chain that ends and a cycle of four calls
     Given the file "go.mod" holds:
       """
       module example.test/m
@@ -43,6 +59,11 @@ Feature: Recursion
 
       func first() { second() }
       func second() {}
+
+      func alpha() { beta() }
+      func beta() { gamma() }
+      func gamma() { delta() }
+      func delta() { alpha() }
       """
     When anti-slop runs with "recursion ./..."
     Then it exits with code 0

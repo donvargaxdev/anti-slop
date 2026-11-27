@@ -95,11 +95,12 @@ type adapters struct {
 
 // diskAdapters is every port bound to the real adapter.
 func diskAdapters() adapters {
+	typed := loader.Checker{}
 	return adapters{
 		Files:     disk.Files{},
 		Comments:  commentsloader.Checker{},
-		Tests:     loader.Checker{Analyzer: testsrule.Analyzer},
-		Recursion: loader.Checker{Analyzer: recursionrule.Analyzer},
+		Tests:     typed.WithAnalyzer(testsrule.Analyzer),
+		Recursion: typed.WithAnalyzer(recursionrule.Analyzer),
 	}
 }
 
@@ -165,7 +166,7 @@ func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Wri
 		ui.Classifiers = []cli.Classifier{tests.Classify}
 		return c.Tests.Run(ctx, ui, tests.Handler{Checker: a.Tests})
 	case "recursion":
-		ui.Classifiers = []cli.Classifier{recursion.Classify}
+		ui.Classifiers = []cli.Classifier{c.Recursion.Classify}
 		return c.Recursion.Run(ctx, ui, recursion.Handler{Checker: a.Recursion})
 	case "version":
 		// What --version prints, as kong prints it, or with --json the

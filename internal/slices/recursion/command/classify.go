@@ -8,7 +8,7 @@ import (
 )
 
 // Classify maps checker failures to problems for the recursion command.
-func Classify(err error) ([]*cli.Problem, bool) {
+func (CLI) Classify(err error) ([]*cli.Problem, bool) {
 	var failure port.CheckFailure
 	if !errors.As(err, &failure) {
 		return nil, false

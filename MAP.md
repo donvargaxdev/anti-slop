@@ -64,7 +64,7 @@ test command. Add an entry for each slice or domain; say where to look, not what
 
 ## Recursion rule
 
-- Start with `internal/rules/recursion/recursion.go` and its `analysistest` fixtures.
+- Start with `internal/rules/recursion/recursion.go` and its catch and leave fixtures.
 - The slice is `internal/slices/recursion/command`, using the shared typed analyzer adapter.
 - Scenarios are in `features/recursion.feature`.
-- Run `go test ./internal/rules/recursion/...`.
+- Run `go test ./cmd/anti-slop -run '^TestReportsRecursion$'`.
