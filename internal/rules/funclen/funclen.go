@@ -185,8 +185,13 @@ func assignmentScopeEnd(stack []ast.Node, end token.Pos) token.Pos {
 func (locals caseBindings) bind(id *ast.Ident, values []ast.Expr, index int, start, end token.Pos) {
 	var tables map[*ast.CompositeLit]struct{}
 	if index < len(values) {
-		if table, ok := ast.Unparen(values[index]).(*ast.CompositeLit); ok {
-			tables = map[*ast.CompositeLit]struct{}{table: {}}
+		switch value := ast.Unparen(values[index]).(type) {
+		case *ast.CompositeLit:
+			tables = map[*ast.CompositeLit]struct{}{value: {}}
+		case *ast.Ident:
+			if binding := locals.at(value.Name, value.Pos()); binding != nil {
+				tables = binding.tables
+			}
 		}
 	}
 	locals[id.Name] = &caseBinding{start, end, tables, locals[id.Name]}
