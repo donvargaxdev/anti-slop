@@ -140,20 +140,41 @@ func (locals caseBindings) collect(root ast.Node, stack []ast.Node, tables map[*
 }
 
 func (locals caseBindings) collectFor(node *ast.ForStmt, stack []ast.Node, tables map[*ast.CompositeLit]struct{}) {
+	head := node.For
 	if node.Init != nil {
 		locals.collect(node.Init, stack, tables)
+		head = node.Init.End()
 	}
-	exits := make([]caseBindings, 0, 2)
-	if node.Cond != nil {
-		locals.collect(node.Cond, stack, tables)
-		exits = append(exits, locals)
-	}
-	iteration := maps.Clone(locals)
-	iteration.collect(node.Body, stack, tables)
-	if node.Post != nil {
+	iteration := locals.collectLoop(head, node.Body.Rbrace, func(iteration caseBindings) {
+		if node.Cond != nil {
+			iteration.collect(node.Cond, stack, tables)
+		}
+		if node.Post == nil {
+			iteration.collect(node.Body, stack, tables)
+			return
+		}
+		body := maps.Clone(iteration)
+		body.collect(node.Body, stack, tables)
+		iteration.receiveBody(body, node.Post.Pos(), node.Body.Rbrace)
 		iteration.collect(node.Post, stack, tables)
+	})
+	if node.Cond != nil {
+		locals.joinBranches(node.End(), locals, iteration)
+	} else {
+		locals.joinBranches(node.End(), iteration)
 	}
-	locals.joinBranches(node.End(), append(exits, iteration)...)
+}
+
+// The post statement executes after the body but appears before it in source.
+// Make the body's writes to still-visible variables available at the post.
+func (locals caseBindings) receiveBody(body caseBindings, post, closeBrace token.Pos) {
+	for name, previous := range locals {
+		if before := locals.at(name, post); before != nil {
+			if after := body.at(name, closeBrace); after != before {
+				locals[name] = &caseBinding{post, before.end, after.tables, previous}
+			}
+		}
+	}
 }
 
 func (locals caseBindings) collectRange(node *ast.RangeStmt, stack []ast.Node, tables map[*ast.CompositeLit]struct{}) {
@@ -163,16 +184,57 @@ func (locals caseBindings) collectRange(node *ast.RangeStmt, stack []ast.Node, t
 			locals.collect(expr, stack, tables)
 		}
 	}
-	iteration := maps.Clone(locals)
-	if node.Tok == token.DEFINE {
-		for _, target := range []ast.Expr{node.Key, node.Value} {
-			if id, ok := target.(*ast.Ident); ok {
-				iteration.bind(id, nil, 0, node.Body.Pos(), node.Body.End())
+	iteration := locals.collectLoop(node.Body.Pos(), node.Body.Rbrace, func(iteration caseBindings) {
+		if node.Tok == token.DEFINE {
+			for _, target := range []ast.Expr{node.Key, node.Value} {
+				if id, ok := target.(*ast.Ident); ok {
+					iteration.bind(id, nil, 0, node.Body.Pos(), node.Body.Rbrace)
+				}
 			}
 		}
-	}
-	iteration.collect(node.Body, stack, tables)
+		iteration.collect(node.Body, stack, tables)
+	})
 	locals.joinBranches(node.End(), locals, iteration)
+}
+
+// Revisiting the body lets its ranges see bindings from earlier iterations.
+// At the closing brace, body declarations have expired and for-init bindings
+// are still visible.
+// Each pass can add only literals already present in the function.
+func (locals caseBindings) collectLoop(head, backEdge token.Pos, collectIteration func(caseBindings)) caseBindings {
+	entry := maps.Clone(locals)
+	for {
+		iteration := maps.Clone(entry)
+		collectIteration(iteration)
+		if !entry.mergeLoopEntry(iteration, head, backEdge) {
+			return iteration
+		}
+	}
+}
+
+func (entry caseBindings) mergeLoopEntry(iteration caseBindings, head, backEdge token.Pos) bool {
+	changed := false
+	for name := range entry {
+		before := entry.at(name, head)
+		if before == nil {
+			continue
+		}
+		var added map[*ast.CompositeLit]struct{}
+		for table := range iteration.at(name, backEdge).tables {
+			if _, known := before.tables[table]; !known {
+				if added == nil {
+					added = make(map[*ast.CompositeLit]struct{})
+				}
+				added[table] = struct{}{}
+			}
+		}
+		if added != nil {
+			maps.Copy(added, before.tables)
+			entry[name] = &caseBinding{head, before.end, added, before}
+			changed = true
+		}
+	}
+	return changed
 }
 
 func (locals caseBindings) collectIf(node *ast.IfStmt, stack []ast.Node, tables map[*ast.CompositeLit]struct{}) {
@@ -280,8 +342,10 @@ func (locals caseBindings) joinBranches(end token.Pos, branches ...caseBindings)
 
 func caseScopeEnd(stack []ast.Node) token.Pos {
 	for i := len(stack) - 1; i > 0; i-- {
-		switch stack[i].(type) {
-		case *ast.BlockStmt, *ast.IfStmt, *ast.ForStmt, *ast.SwitchStmt,
+		switch scope := stack[i].(type) {
+		case *ast.BlockStmt:
+			return scope.Rbrace
+		case *ast.IfStmt, *ast.ForStmt, *ast.SwitchStmt,
 			*ast.TypeSwitchStmt, *ast.CaseClause, *ast.CommClause:
 			return stack[i].End()
 		}

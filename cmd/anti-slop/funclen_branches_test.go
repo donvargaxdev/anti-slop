@@ -249,6 +249,57 @@ for range n { cases = TABLE }
 cases := TABLE
 for _, cases := range [][]int{nil} { cases = TABLE; _ = cases }
 ` + runCases, 1},
+		{"for body reads a table from the previous iteration", `
+var cases []int
+for i := 0; i < 2; i++ {
+	for range cases {}
+	cases = TABLE
+}
+`, 0},
+		{"range body reads a table after two back edges", `
+var cases, next []int
+for range 3 {
+	for range cases {}
+	cases = next
+	next = TABLE
+}
+`, 0},
+		{"for body reads an initializer variable set by the previous post", `
+for cases := []int(nil); n > 0; cases = TABLE {
+	for range cases {}
+	n--
+}
+`, 0},
+		{"for post carries a table assigned in the body", `
+var cases, next []int
+for ; n > 0; cases = next {
+	for range cases {}
+	next = TABLE
+	n--
+}
+`, 0},
+		{"for post clears the table before it can carry over", `
+var cases []int
+for ; n > 0; cases = nil {
+	for range cases {}
+	cases = TABLE
+	n--
+}
+`, 1},
+		{"range variable is rebound on each iteration", `
+for _, cases := range [][]int{nil, nil} {
+	for range cases {}
+	cases = TABLE
+}
+`, 1},
+		{"loop body declaration does not carry into an outer variable", `
+var cases []int
+for ; n > 0; n-- {
+	for range cases {}
+	cases := TABLE
+	_ = cases
+}
+`, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const header = "package example\nfunc test(n int) {\n"
