@@ -292,6 +292,22 @@ for _, cases := range [][]int{nil, nil} {
 	cases = TABLE
 }
 `, 1},
+		{"range assignment overwrites the value on each iteration", `
+cases := TABLE
+for _, cases = range [][]int{nil, nil} {
+	for range cases {}
+	cases = TABLE
+}
+`, 1},
+		{"range assignment overwrites a parenthesized key", `
+cases := TABLE
+var ready chan []int
+for (cases) = range ready { for range cases {} }
+`, 1},
+		{"range assignment keeps body writes visible after the loop", `
+var cases []int
+for _, cases = range [][]int{nil} { cases = TABLE }
+` + runCases, 0},
 		{"loop body declaration does not carry into an outer variable", `
 var cases []int
 for ; n > 0; n-- {

@@ -185,10 +185,13 @@ func (locals caseBindings) collectRange(node *ast.RangeStmt, stack []ast.Node, t
 		}
 	}
 	iteration := locals.collectLoop(node.Body.Pos(), node.Body.Rbrace, func(iteration caseBindings) {
-		if node.Tok == token.DEFINE {
-			for _, target := range []ast.Expr{node.Key, node.Value} {
-				if id, ok := target.(*ast.Ident); ok {
+		// Range assigns its iteration variables before every visit to the body.
+		for _, target := range []ast.Expr{node.Key, node.Value} {
+			if id, ok := ast.Unparen(target).(*ast.Ident); ok {
+				if node.Tok == token.DEFINE {
 					iteration.bind(id, nil, 0, node.Body.Pos(), node.Body.Rbrace)
+				} else if binding := iteration.at(id.Name, node.Body.Pos()); binding != nil {
+					iteration.bind(id, nil, 0, node.Body.Pos(), assignmentScopeEnd(stack, binding.end))
 				}
 			}
 		}

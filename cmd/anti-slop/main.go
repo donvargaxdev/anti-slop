@@ -34,9 +34,11 @@ import (
 	checking "github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/disk"
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/port"
+	conditionsrule "github.com/donvargaxdev/anti-slop/internal/rules/conditions"
 	funclenrule "github.com/donvargaxdev/anti-slop/internal/rules/funclen"
 	comments "github.com/donvargaxdev/anti-slop/internal/slices/comments/command"
 	commentsloader "github.com/donvargaxdev/anti-slop/internal/slices/comments/loader"
+	conditions "github.com/donvargaxdev/anti-slop/internal/slices/conditions/command"
 	count "github.com/donvargaxdev/anti-slop/internal/slices/count/command"
 	"github.com/donvargaxdev/anti-slop/internal/slices/count/stdin"
 	funclen "github.com/donvargaxdev/anti-slop/internal/slices/funclen/command"
@@ -58,6 +60,7 @@ type commandLine struct {
 
 	Count      count.CLI      `cmd:"" help:"Count the lines and words of a file, or of standard input."`
 	Comments   comments.CLI   `cmd:"" help:"Report the Go comments that no tool reads."`
+	Conditions conditions.CLI `cmd:"" help:"Report long compound if and for conditions."`
 	Tests      tests.CLI      `cmd:"" help:"Report sleeps and raw environment changes in Go test files."`
 	Funclen    funclen.CLI    `cmd:"" help:"Report Go function bodies longer than 70 lines."`
 	Version    cli.Version    `cmd:"" help:"Print the version and the commit it was built from."`
@@ -86,19 +89,21 @@ func main() {
 // porttest's fakes (scenarios_test.go), and TestEveryPortIsBoundOnDiskAndInProcess
 // holds both to every field, so a new port is bound in each before it passes.
 type adapters struct {
-	Files    port.Files
-	Comments checking.Checker
-	Tests    checking.Checker
-	Funclen  checking.Checker
+	Files      port.Files
+	Comments   checking.Checker
+	Conditions checking.Checker
+	Tests      checking.Checker
+	Funclen    checking.Checker
 }
 
 // diskAdapters is every port bound to the real adapter.
 func diskAdapters() adapters {
 	return adapters{
-		Files:    disk.Files{},
-		Comments: commentsloader.Checker{},
-		Tests:    testsloader.Checker{},
-		Funclen:  commentsloader.ForAnalyzer(funclenrule.Analyzer),
+		Files:      disk.Files{},
+		Comments:   commentsloader.Checker{},
+		Conditions: commentsloader.Checker{Report: commentsloader.ReportSources(conditionsrule.Analyzer)},
+		Tests:      testsloader.Checker{},
+		Funclen:    commentsloader.Checker{Report: commentsloader.ReportSources(funclenrule.Analyzer)},
 	}
 }
 
@@ -160,6 +165,8 @@ func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Wri
 	case "comments":
 		ui.Classifiers = []cli.Classifier{comments.Classify}
 		return c.Comments.Run(ctx, ui, comments.Handler{Checker: a.Comments})
+	case "conditions":
+		return c.Conditions.Run(ctx, ui, conditions.Handler{Checker: a.Conditions})
 	case "tests":
 		ui.Classifiers = []cli.Classifier{tests.Classify}
 		return c.Tests.Run(ctx, ui, tests.Handler{Checker: a.Tests})

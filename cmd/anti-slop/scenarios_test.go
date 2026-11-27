@@ -101,20 +101,26 @@ func (m *memory) Run(r features.Run) (features.Result, error) {
 }
 
 // inProcessAdapters is diskAdapters' twin: every port bound to porttest's
-// fake over the memory. A new port is bound here by hand, and
-// TestEveryPortIsBoundOnDiskAndInProcess fails until it is.
+// fake over the memory.
 func (m *memory) inProcessAdapters() adapters {
 	failures := map[string]port.ReadFailure{}
 	for name := range m.folders {
 		failures[name] = porttest.Unreadable(name)
 	}
-	bound := adapters{Files: porttest.Files{Data: m.files, Failures: failures}}
-	for _, field := range reflect.ValueOf(&bound).Elem().Fields() {
+	return withFakeCheckers(adapters{Files: porttest.Files{Data: m.files, Failures: failures}}, checkingtest.Checker{})
+}
+
+// Bind the same fake to every checker port so tests can run before a new
+// checker command and its adapter field are added.
+func withFakeCheckers(a adapters, checker checkingtest.Checker) adapters {
+	fields := reflect.ValueOf(&a).Elem()
+	for i := range fields.NumField() {
+		field := fields.Field(i)
 		if field.Type() == reflect.TypeFor[checking.Checker]() {
-			field.Set(reflect.ValueOf(checkingtest.Checker{}))
+			field.Set(reflect.ValueOf(checker))
 		}
 	}
-	return bound
+	return a
 }
 
 // cleanEnv unsets every ANTI_SLOP_ variable and sets the run's, and
