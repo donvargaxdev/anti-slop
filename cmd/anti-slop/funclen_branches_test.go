@@ -299,6 +299,13 @@ for _, cases = range [][]int{nil, nil} {
 	cases = TABLE
 }
 `, 1},
+		{"range assignment evaluates its target before overwriting the value", `
+var cases []int
+var indices [1]int
+for indices[func() int { for range cases {}; return 0 }()], cases = range [][]int{nil, nil} {
+	cases = TABLE
+}
+`, 0},
 		{"range assignment overwrites a parenthesized key", `
 cases := TABLE
 var ready chan []int

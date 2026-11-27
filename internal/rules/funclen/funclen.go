@@ -179,14 +179,16 @@ func (locals caseBindings) receiveBody(body caseBindings, post, closeBrace token
 
 func (locals caseBindings) collectRange(node *ast.RangeStmt, stack []ast.Node, tables map[*ast.CompositeLit]struct{}) {
 	locals.recordRange(node.X, tables)
-	for _, expr := range []ast.Expr{node.Key, node.Value, node.X} {
-		if expr != nil {
-			locals.collect(expr, stack, tables)
+	locals.collect(node.X, stack, tables)
+	targets := []ast.Expr{node.Key, node.Value}
+	iteration := locals.collectLoop(node.For, node.Body.Rbrace, func(iteration caseBindings) {
+		for _, target := range targets {
+			if target != nil {
+				iteration.collect(target, stack, tables)
+			}
 		}
-	}
-	iteration := locals.collectLoop(node.Body.Pos(), node.Body.Rbrace, func(iteration caseBindings) {
 		// Range assigns its iteration variables before every visit to the body.
-		for _, target := range []ast.Expr{node.Key, node.Value} {
+		for _, target := range targets {
 			if id, ok := ast.Unparen(target).(*ast.Ident); ok {
 				if node.Tok == token.DEFINE {
 					iteration.bind(id, nil, 0, node.Body.Pos(), node.Body.Rbrace)
