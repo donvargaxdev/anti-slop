@@ -209,6 +209,55 @@ _ = cases
 	}
 }
 
+func TestCaseTableLoopBindings(t *testing.T) {
+	table := "[]int{\n" + strings.Repeat("0,\n", 71) + "}"
+	const runCases = "\nfor range cases {}\n"
+	for _, tc := range []struct {
+		name string
+		body string
+		want int
+	}{
+		{"for body may not run", `
+cases := TABLE
+for i := 0; i < n; i++ { cases = nil }
+` + runCases, 0},
+		{"range body may not run", `
+cases := TABLE
+for range n { cases = nil }
+` + runCases, 0},
+		{"for initializer always runs", `
+cases := TABLE
+for cases = nil; n > 0; n-- {}
+` + runCases, 1},
+		{"for post runs after the body", `
+cases := TABLE
+for ; n > 0; cases = nil { for range cases {}; n-- }
+`, 0},
+		{"for post can supply a second table", `
+cases := TABLE
+for ; n > 0; cases = TABLE { n-- }
+` + runCases, 0},
+		{"for without a condition runs its body", `
+cases := TABLE
+for { cases = nil; break }
+` + runCases, 1},
+		{"loop body can supply a second table", `
+cases := TABLE
+for range n { cases = TABLE }
+` + runCases, 0},
+		{"loop declaration cannot replace outer table", `
+cases := TABLE
+for _, cases := range [][]int{nil} { cases = TABLE; _ = cases }
+` + runCases, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const header = "package example\nfunc test(n int) {\n"
+			source := header + strings.ReplaceAll(tc.body, "TABLE", table) + "}\n"
+			assertCaseTableDiagnostics(t, source, tc.want)
+		})
+	}
+}
+
 func assertCaseTableDiagnostics(t *testing.T, source string, want int) {
 	t.Helper()
 	dir := t.TempDir()

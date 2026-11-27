@@ -109,6 +109,12 @@ func (locals caseBindings) collect(root ast.Node, stack []ast.Node, tables map[*
 		case *ast.SelectStmt:
 			locals.collectSelect(node, append(stack, node, node.Body), tables)
 			return false
+		case *ast.ForStmt:
+			locals.collectFor(node, append(stack, node), tables)
+			return false
+		case *ast.RangeStmt:
+			locals.collectRange(node, append(stack, node), tables)
+			return false
 		case *ast.AssignStmt:
 			for i, target := range node.Lhs {
 				if id, ok := target.(*ast.Ident); ok {
@@ -128,18 +134,45 @@ func (locals caseBindings) collect(root ast.Node, stack []ast.Node, tables map[*
 		case *ast.FuncLit:
 			locals.bindFields(node.Type.Params, node.Body)
 			locals.bindFields(node.Type.Results, node.Body)
-		case *ast.RangeStmt:
-			locals.recordRange(node.X, tables)
-			if node.Tok == token.DEFINE {
-				for _, target := range []ast.Expr{node.Key, node.Value} {
-					if id, ok := target.(*ast.Ident); ok {
-						locals.bind(id, nil, 0, node.Body.Pos(), node.Body.End())
-					}
-				}
-			}
 		}
 		return true
 	})
+}
+
+func (locals caseBindings) collectFor(node *ast.ForStmt, stack []ast.Node, tables map[*ast.CompositeLit]struct{}) {
+	if node.Init != nil {
+		locals.collect(node.Init, stack, tables)
+	}
+	exits := make([]caseBindings, 0, 2)
+	if node.Cond != nil {
+		locals.collect(node.Cond, stack, tables)
+		exits = append(exits, locals)
+	}
+	iteration := maps.Clone(locals)
+	iteration.collect(node.Body, stack, tables)
+	if node.Post != nil {
+		iteration.collect(node.Post, stack, tables)
+	}
+	locals.joinBranches(node.End(), append(exits, iteration)...)
+}
+
+func (locals caseBindings) collectRange(node *ast.RangeStmt, stack []ast.Node, tables map[*ast.CompositeLit]struct{}) {
+	locals.recordRange(node.X, tables)
+	for _, expr := range []ast.Expr{node.Key, node.Value, node.X} {
+		if expr != nil {
+			locals.collect(expr, stack, tables)
+		}
+	}
+	iteration := maps.Clone(locals)
+	if node.Tok == token.DEFINE {
+		for _, target := range []ast.Expr{node.Key, node.Value} {
+			if id, ok := target.(*ast.Ident); ok {
+				iteration.bind(id, nil, 0, node.Body.Pos(), node.Body.End())
+			}
+		}
+	}
+	iteration.collect(node.Body, stack, tables)
+	locals.joinBranches(node.End(), locals, iteration)
 }
 
 func (locals caseBindings) collectIf(node *ast.IfStmt, stack []ast.Node, tables map[*ast.CompositeLit]struct{}) {
