@@ -162,7 +162,7 @@ func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Wri
 		ui.Classifiers = []cli.Classifier{tests.Classify}
 		return c.Tests.Run(ctx, ui, tests.Handler{Checker: a.Tests})
 	case "unitslast":
-		ui.Classifiers = []cli.Classifier{unitslast.Classify}
+		ui.Classifiers = []cli.Classifier{c.Unitslast.Classify}
 		return c.Unitslast.Run(ctx, ui, unitslast.Handler{Checker: a.Unitslast})
 	case "version":
 		// What --version prints, as kong prints it, or with --json the

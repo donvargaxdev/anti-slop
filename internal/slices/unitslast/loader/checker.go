@@ -5,7 +5,6 @@ import (
 	"context"
 	"go/token"
 	"path/filepath"
-	"strings"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/packages"
@@ -43,7 +42,8 @@ func (c Checker) Check(ctx context.Context, patterns []string) (found []port.Fin
 		if len(pkg.Errors) > 0 {
 			return nil, &port.Failed{Reason: pkg.Errors[0].Error()}
 		}
-		unitslast.Report(&analysis.Pass{
+		// The analyzer only reports diagnostics and always returns nil.
+		_, _ = unitslast.Analyzer.Run(&analysis.Pass{
 			Analyzer:  unitslast.Analyzer,
 			Fset:      fset,
 			Files:     pkg.Syntax,
@@ -61,8 +61,8 @@ func (c Checker) Check(ctx context.Context, patterns []string) (found []port.Fin
 }
 
 func relative(root, name string) string {
-	rel, err := filepath.Rel(root, name)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	rel, _ := filepath.Rel(root, name)
+	if !filepath.IsLocal(rel) {
 		return name
 	}
 	return rel

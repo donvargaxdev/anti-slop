@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -106,10 +107,15 @@ func (m *memory) inProcessAdapters() adapters {
 	for name := range m.folders {
 		failures[name] = porttest.Unreadable(name)
 	}
-	return adapters{
+	provided := adapters{
 		Files:    porttest.Files{Data: m.files, Failures: failures},
-		Comments: checkingtest.Checker{}, Tests: checkingtest.Checker{}, Unitslast: checkingtest.Checker{},
+		Comments: checkingtest.Checker{}, Tests: checkingtest.Checker{},
 	}
+	// The scenario driver also builds against the base command line.
+	if checker := reflect.ValueOf(&provided).Elem().FieldByName("Unitslast"); checker.IsValid() {
+		checker.Set(reflect.ValueOf(checkingtest.Checker{}))
+	}
+	return provided
 }
 
 // cleanEnv unsets every ANTI_SLOP_ variable and sets the run's, and

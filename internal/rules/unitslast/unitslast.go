@@ -12,14 +12,11 @@ import (
 var Analyzer = &analysis.Analyzer{
 	Name: "unitslast",
 	Doc:  "report Go declarations with a leading unit or qualifier",
-	Run: func(pass *analysis.Pass) (any, error) {
-		Report(pass)
-		return nil, nil
-	},
+	Run:  run,
 }
 
-// Report checks each declaration once, regardless of how often it is used.
-func Report(pass *analysis.Pass) {
+// run checks each declaration once, regardless of how often it is used.
+func run(pass *analysis.Pass) (any, error) {
 	for ident := range pass.TypesInfo.Defs {
 		word := leadingWord(ident.Name)
 		switch word {
@@ -33,6 +30,7 @@ func Report(pass *analysis.Pass) {
 			})
 		}
 	}
+	return nil, nil
 }
 
 // leadingWord returns the first word of a compound name, ignoring case.
