@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"maps"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -75,26 +76,35 @@ func testCaseLines(fset *token.FileSet, body *ast.BlockStmt) int {
 	return len(lines)
 }
 
-// A nil table still shadows an earlier literal while the binding is in scope.
+// Bindings are immutable, so branches can share the history up to the if.
+// An empty table set still shadows an earlier literal while in scope.
 type caseBinding struct {
 	start, end token.Pos
-	table      *ast.CompositeLit
+	tables     map[*ast.CompositeLit]struct{}
+	previous   *caseBinding
 }
 
-type caseBindings map[string][]caseBinding
+type caseBindings map[string]*caseBinding
 
 // caseTables finds inline tables and tables introduced within the body.
 func caseTables(body *ast.BlockStmt) map[*ast.CompositeLit]struct{} {
-	locals := make(caseBindings)
 	tables := make(map[*ast.CompositeLit]struct{})
-	ast.PreorderStack(body, nil, func(node ast.Node, stack []ast.Node) bool {
+	make(caseBindings).collect(body, nil, tables)
+	return tables
+}
+
+func (locals caseBindings) collect(root ast.Node, stack []ast.Node, tables map[*ast.CompositeLit]struct{}) {
+	ast.PreorderStack(root, stack, func(node ast.Node, stack []ast.Node) bool {
 		switch node := node.(type) {
+		case *ast.IfStmt:
+			locals.collectIf(node, append(stack, node), tables)
+			return false
 		case *ast.AssignStmt:
 			for i, target := range node.Lhs {
 				if id, ok := target.(*ast.Ident); ok {
 					end := caseScopeEnd(stack)
 					if node.Tok == token.ASSIGN {
-						if binding := locals.at(id); binding.end.IsValid() {
+						if binding := locals.at(id.Name, id.Pos()); binding != nil {
 							end = assignmentScopeEnd(stack, binding.end)
 						}
 					}
@@ -109,9 +119,7 @@ func caseTables(body *ast.BlockStmt) map[*ast.CompositeLit]struct{} {
 			locals.bindFields(node.Type.Params, node.Body)
 			locals.bindFields(node.Type.Results, node.Body)
 		case *ast.RangeStmt:
-			if table := locals.rangeTable(node.X); table != nil {
-				tables[table] = struct{}{}
-			}
+			locals.recordRange(node.X, tables)
 			if node.Tok == token.DEFINE {
 				for _, target := range []ast.Expr{node.Key, node.Value} {
 					if id, ok := target.(*ast.Ident); ok {
@@ -122,7 +130,34 @@ func caseTables(body *ast.BlockStmt) map[*ast.CompositeLit]struct{} {
 		}
 		return true
 	})
-	return tables
+}
+
+func (locals caseBindings) collectIf(node *ast.IfStmt, stack []ast.Node, tables map[*ast.CompositeLit]struct{}) {
+	if node.Init != nil {
+		locals.collect(node.Init, stack, tables)
+	}
+	locals.collect(node.Cond, stack, tables)
+	then := maps.Clone(locals)
+	then.collect(node.Body, stack, tables)
+	otherwise := maps.Clone(locals)
+	if node.Else != nil {
+		otherwise.collect(node.Else, stack, tables)
+	}
+	locals.joinBranches(node.End(), then, otherwise)
+}
+
+// Looking up both arms after the if drops declarations scoped to either arm.
+func (locals caseBindings) joinBranches(end token.Pos, then, otherwise caseBindings) {
+	for name := range locals {
+		left, right := then.at(name, end), otherwise.at(name, end)
+		if left == right {
+			continue
+		}
+		tables := make(map[*ast.CompositeLit]struct{}, len(left.tables)+len(right.tables))
+		maps.Copy(tables, left.tables)
+		maps.Copy(tables, right.tables)
+		locals[name] = &caseBinding{end, min(left.end, right.end), tables, locals[name]}
+	}
 }
 
 func caseScopeEnd(stack []ast.Node) token.Pos {
@@ -148,11 +183,13 @@ func assignmentScopeEnd(stack []ast.Node, end token.Pos) token.Pos {
 }
 
 func (locals caseBindings) bind(id *ast.Ident, values []ast.Expr, index int, start, end token.Pos) {
-	var table *ast.CompositeLit
+	var tables map[*ast.CompositeLit]struct{}
 	if index < len(values) {
-		table, _ = ast.Unparen(values[index]).(*ast.CompositeLit)
+		if table, ok := ast.Unparen(values[index]).(*ast.CompositeLit); ok {
+			tables = map[*ast.CompositeLit]struct{}{table: {}}
+		}
 	}
-	locals[id.Name] = append(locals[id.Name], caseBinding{start, end, table})
+	locals[id.Name] = &caseBinding{start, end, tables, locals[id.Name]}
 }
 
 func (locals caseBindings) bindFields(fields *ast.FieldList, body *ast.BlockStmt) {
@@ -166,23 +203,22 @@ func (locals caseBindings) bindFields(fields *ast.FieldList, body *ast.BlockStmt
 	}
 }
 
-func (locals caseBindings) rangeTable(expr ast.Expr) *ast.CompositeLit {
+func (locals caseBindings) recordRange(expr ast.Expr, tables map[*ast.CompositeLit]struct{}) {
 	switch expr := ast.Unparen(expr).(type) {
 	case *ast.CompositeLit:
-		return expr
+		tables[expr] = struct{}{}
 	case *ast.Ident:
-		return locals.at(expr).table
+		if binding := locals.at(expr.Name, expr.Pos()); binding != nil {
+			maps.Copy(tables, binding.tables)
+		}
 	}
-	return nil
 }
 
-func (locals caseBindings) at(id *ast.Ident) caseBinding {
-	bindings := locals[id.Name]
-	for i := len(bindings) - 1; i >= 0; i-- {
-		binding := bindings[i]
-		if binding.start <= id.Pos() && id.Pos() < binding.end {
+func (locals caseBindings) at(name string, pos token.Pos) *caseBinding {
+	for binding := locals[name]; binding != nil; binding = binding.previous {
+		if binding.start <= pos && pos < binding.end {
 			return binding
 		}
 	}
-	return caseBinding{}
+	return nil
 }
