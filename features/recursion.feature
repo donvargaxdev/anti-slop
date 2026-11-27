@@ -35,14 +35,14 @@ Feature: Recursion
       func gamma() { alpha() }
       """
     When anti-slop runs with "recursion ./..."
-    Then it exits with code 0
-    And its standard output lists "p.go:3:6: recursion: direct calls itself"
+    Then its standard output lists "p.go:3:6: recursion: direct calls itself"
     And its standard output lists "p.go:4:6: recursion: first calls itself through a cycle"
     And its standard output lists "p.go:5:6: recursion: second calls itself through a cycle"
     And its standard output lists "cycle.go:3:6: recursion: alpha calls itself through a cycle"
     And its standard output lists "cycle.go:4:6: recursion: beta calls itself through a cycle"
     And its standard output lists "cycle_end.go:3:6: recursion: gamma calls itself through a cycle"
     And its standard output does not say "caller"
+    And it exits with code 0
     And its error output is empty
 
   @ID-RECURSION-02 @recursion-rule @binary-only
@@ -85,6 +85,6 @@ Feature: Recursion
       go 1.27
       """
     When anti-slop runs with "recursion ./nothing/..."
-    Then it exits with code 82
+    Then its error output says "anti-slop: the packages cannot be loaded"
+    And it exits with code 82
     And its standard output is empty
-    And its error output says "anti-slop: the packages cannot be loaded"
