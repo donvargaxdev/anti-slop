@@ -1,5 +1,6 @@
-// Package source loads and checks the original Go source files of packages.
-package source
+// Package loader loads original Go source with go list and runs syntax-only
+// analyzers over it.
+package loader
 
 import (
 	"context"
@@ -13,14 +14,22 @@ import (
 	"golang.org/x/tools/go/packages"
 
 	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
+	"github.com/donvargaxdev/anti-slop/internal/rules/comments"
 )
 
 // Checker is the port's implementation over the go command. Dir is the folder
 // patterns are read in and paths are given relative to; "" is the working
-// folder.
+// folder. The zero value checks comments.
 type Checker struct {
-	Dir    string
-	Report func(*token.FileSet, []*ast.File, func(analysis.Diagnostic))
+	Dir         string
+	readSources func(context.Context, *token.FileSet, []string, func(analysis.Diagnostic)) port.CheckFailure
+}
+
+// ForAnalyzer creates a checker for an analyzer that only needs syntax.
+func ForAnalyzer(analyzer *analysis.Analyzer) Checker {
+	return Checker{readSources: func(ctx context.Context, fset *token.FileSet, names []string, report func(analysis.Diagnostic)) port.CheckFailure {
+		return analyzeSources(ctx, fset, names, report, analyzer)
+	}}
 }
 
 // Check loads the packages of patterns with their tests, parses the source
@@ -49,11 +58,15 @@ func (c Checker) Check(ctx context.Context, patterns []string) (found []port.Fin
 		return nil, &port.Failed{Reason: "the patterns match no package"}
 	}
 	root, _ := filepath.Abs(c.Dir)
+	read := c.readSources
+	if read == nil {
+		read = reportSources
+	}
 	for _, pkg := range pkgs {
 		if len(pkg.Errors) > 0 {
 			return nil, &port.Failed{Reason: pkg.Errors[0].Error()}
 		}
-		failure := c.reportSources(ctx, fset, pkg.GoFiles, func(d analysis.Diagnostic) {
+		failure := read(ctx, fset, pkg.GoFiles, func(d analysis.Diagnostic) {
 			at := fset.PositionFor(d.Pos, false)
 			found = append(found, port.Finding{
 				Path: relative(root, at.Filename), Line: at.Line, Col: at.Column, Rule: d.Category, Reason: d.Message,
@@ -66,21 +79,37 @@ func (c Checker) Check(ctx context.Context, patterns []string) (found []port.Fin
 	return port.Merge(nil, found), nil
 }
 
-func (c Checker) reportSources(ctx context.Context, fset *token.FileSet, names []string, report func(analysis.Diagnostic)) port.CheckFailure {
+func reportSources(ctx context.Context, fset *token.FileSet, names []string, report func(analysis.Diagnostic)) port.CheckFailure {
+	return analyzeSources(ctx, fset, names, report, comments.Analyzer)
+}
+
+func analyzeSources(ctx context.Context, fset *token.FileSet, names []string, report func(analysis.Diagnostic), analyzer *analysis.Analyzer) port.CheckFailure {
 	for _, name := range names {
 		if ctx.Err() != nil {
 			break
 		}
-		file, err := parser.ParseFile(fset, name, nil, parser.ParseComments|parser.SkipObjectResolution)
-		if err != nil {
+		if err := analyzeFile(fset, name, report, analyzer); err != nil {
 			return &port.Failed{Reason: err.Error()}
 		}
-		c.Report(fset, []*ast.File{file}, report)
 	}
 	if ctx.Err() != nil {
 		return &port.Cancelled{}
 	}
 	return nil
+}
+
+func analyzeFile(fset *token.FileSet, name string, report func(analysis.Diagnostic), analyzer *analysis.Analyzer) error {
+	file, err := parser.ParseFile(fset, name, nil, parser.ParseComments|parser.SkipObjectResolution)
+	if err != nil {
+		return err
+	}
+	_, err = analyzer.Run(&analysis.Pass{
+		Analyzer: analyzer,
+		Fset:     fset,
+		Files:    []*ast.File{file},
+		Report:   report,
+	})
+	return err
 }
 
 // relative is name below root as a relative path, or name as it is when it

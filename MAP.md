@@ -49,7 +49,7 @@ test command. Add an entry for each slice or domain; say where to look, not what
 - Start: `internal/rules/comments/comments.go`, the `go/analysis` pass; fixtures: `testdata/src/catch`
   (must catch) and `testdata/src/leave` (must leave), run by `comments_test.go`.
 - Slice: `internal/slices/comments/command` (the `comments` command, its `Patterns` and `Classify`),
-  with the source adapter in `internal/engine/checking/source`. The checker port, fake and
+  with the source adapter in `internal/slices/comments/loader`. The checker port, fake and
   contract suite are under `internal/engine/checking/port`.
 - Scenarios: `features/comments.feature`; the ones that load packages are `@binary-only`.
 - Test: `go test ./internal/rules/... ./internal/slices/comments/... ./cmd/... -count=1`
@@ -67,4 +67,4 @@ test command. Add an entry for each slice or domain; say where to look, not what
 - Analyzer and fixtures: `internal/rules/funclen`.
 - Command: `internal/slices/funclen/command`, using the source adapter shared with `comments`.
 - Scenarios: `features/funclen.feature`.
-- Test: `go test ./internal/rules/funclen/... ./internal/engine/checking/source/...`.
+- Test: `go test ./cmd/anti-slop -run TestFunctionLength` checks the fixtures through the CLI.

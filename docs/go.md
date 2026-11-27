@@ -41,13 +41,13 @@ The `comments` command is the second slice, `internal/slices/comments`, and runs
 
 - `internal/rules/<name>` is a rule: a `go/analysis` pass over syntax, importing the standard
   library and the analysis framework and nothing of ours (`rule`, `rule-tests`). Its fixtures are
-  `analysistest` packages under `testdata/src`, one that must be caught and one that must be left.
+  packages under `testdata/src`, one that must be caught and one that must be left.
   The graph check lets only an adapter import a rule, and `cmd` assemble one.
 - `internal/engine/checking/port` declares the shared `Checker`, `Finding` and the sealed failures
   `Failed` and `Cancelled`. Its `porttest` holds the fake and the contract suite for the adapters.
-- `internal/engine/checking/source` loads the patterns with go list through `go/packages` and
+- `internal/slices/comments/loader` loads the patterns with go list through `go/packages` and
   runs a syntax rule over each package's original files, tests included, reporting each finding
-  once. The `funclen` slice uses the same adapter.
+  once. The CLI assembly uses this loader for both `comments` and `funclen`.
 - `command` is the command: `Patterns` is the checked argument (no empty or NUL pattern, none a flag
   or a loader query), `Run` prints each finding as `path:line:col: comments: <reason>` and exits 0,
   since the rule only reports, and `Classify` gives the failures their problems.

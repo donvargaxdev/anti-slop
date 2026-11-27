@@ -1,4 +1,4 @@
-package source_test
+package loader_test
 
 import (
 	"os"
@@ -8,8 +8,7 @@ import (
 
 	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
 	"github.com/donvargaxdev/anti-slop/internal/engine/checking/port/porttest"
-	"github.com/donvargaxdev/anti-slop/internal/engine/checking/source"
-	"github.com/donvargaxdev/anti-slop/internal/rules/comments"
+	"github.com/donvargaxdev/anti-slop/internal/slices/comments/loader"
 )
 
 func module(t *testing.T, files map[string]string) string {
@@ -35,13 +34,13 @@ func TestTheLoaderHoldsTheContract(t *testing.T) {
 			"dirty/dirty.go":   "package dirty\n\n// F does a thing.\nfunc F() {}\n\n// G does another.\nfunc G() {}\n",
 			"broken/broken.go": "package broken\n\nfunc F( {\n",
 		})
-		return porttest.CheckerCase{Checker: source.Checker{Report: comments.Report, Dir: dir}, Clean: "./clean", Dirty: "./dirty", Broken: "./broken"}
+		return porttest.CheckerCase{Checker: loader.Checker{Dir: dir}, Clean: "./clean", Dirty: "./dirty", Broken: "./broken"}
 	})
 }
 
 func TestTheLoaderGivesPathsBelowItsFolderAndTheirPlace(t *testing.T) {
 	dir := module(t, map[string]string{"p/p.go": "package p\n\nfunc F() {\n\tx := 1 // why\n\t_ = x\n}\n"})
-	got, failure := source.Checker{Report: comments.Report, Dir: dir}.Check(t.Context(), []string{"./..."})
+	got, failure := loader.Checker{Dir: dir}.Check(t.Context(), []string{"./..."})
 	want := port.Finding{
 		Path: filepath.Join("p", "p.go"), Line: 4, Col: 9, Rule: "comments",
 		Reason: "no tool reads this comment: let the code explain itself and a test carry the why",
@@ -59,7 +58,7 @@ func TestTheLoaderReportsDistinctPhysicalPositionsAfterLineDirectives(t *testing
 //line remapped.go:100
 // Second comment.
 `})
-	got, failure := source.Checker{Report: comments.Report, Dir: dir}.Check(t.Context(), []string{"./..."})
+	got, failure := loader.Checker{Dir: dir}.Check(t.Context(), []string{"./..."})
 	const reason = "no tool reads this comment: let the code explain itself and a test carry the why"
 	want := []port.Finding{
 		{Path: "p.go", Line: 4, Col: 1, Rule: "comments", Reason: reason},
@@ -76,7 +75,7 @@ func TestTheLoaderChecksTestFilesOnceEach(t *testing.T) {
 		"p/p_test.go":        "package p\n\nimport \"testing\"\n\n// in the package's tests\nfunc TestF(t *testing.T) {}\n",
 		"p/external_test.go": "package p_test\n\nimport \"testing\"\n\n// in its external tests\nfunc TestG(t *testing.T) {}\n",
 	})
-	got, failure := source.Checker{Report: comments.Report, Dir: dir}.Check(t.Context(), []string{"./p"})
+	got, failure := loader.Checker{Dir: dir}.Check(t.Context(), []string{"./p"})
 	if failure != nil || len(got) != 2 {
 		t.Fatalf("Check = %v, %v, want two findings, one for each test file", got, failure)
 	}
@@ -88,7 +87,7 @@ func TestTheLoaderChecksTestFilesOnceEach(t *testing.T) {
 func TestAFileOutsideTheFolderKeepsItsPath(t *testing.T) {
 	outer := module(t, map[string]string{"p/p.go": "package p\n\n// here\nfunc F() {}\n"})
 	inner := filepath.Join(outer, "p")
-	got, failure := source.Checker{Report: comments.Report, Dir: inner}.Check(t.Context(), []string{outer + "/p"})
+	got, failure := loader.Checker{Dir: inner}.Check(t.Context(), []string{outer + "/p"})
 	if failure != nil || len(got) != 1 || got[0].Path != "p.go" {
 		t.Errorf("Check = %v, %v, want one finding of p.go", got, failure)
 	}
@@ -100,7 +99,7 @@ func TestAPatternOutsideTheFolderIsGivenWhole(t *testing.T) {
 	if err := os.Mkdir(elsewhere, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	got, failure := source.Checker{Report: comments.Report, Dir: elsewhere}.Check(t.Context(), []string{"example.test/m/p"})
+	got, failure := loader.Checker{Dir: elsewhere}.Check(t.Context(), []string{"example.test/m/p"})
 	want := filepath.Join(outer, "p", "p.go")
 	if failure != nil || len(got) != 1 || got[0].Path != want {
 		t.Errorf("Check = %v, %v, want one finding at %s", got, failure, want)
@@ -109,7 +108,7 @@ func TestAPatternOutsideTheFolderIsGivenWhole(t *testing.T) {
 
 func TestAPatternThatMatchesNoPackageIsFailed(t *testing.T) {
 	dir := module(t, map[string]string{"p/p.go": "package p\n"})
-	got, failure := source.Checker{Report: comments.Report, Dir: dir}.Check(t.Context(), []string{"./nothing/..."})
+	got, failure := loader.Checker{Dir: dir}.Check(t.Context(), []string{"./nothing/..."})
 	if _, ok := failure.(*port.Failed); !ok || got != nil {
 		t.Errorf("Check = %v, %v, want *port.Failed and no findings", got, failure)
 	}
@@ -117,7 +116,7 @@ func TestAPatternThatMatchesNoPackageIsFailed(t *testing.T) {
 
 func TestAFolderThatDoesNotExistIsFailed(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
-	got, failure := source.Checker{Report: comments.Report, Dir: missing}.Check(t.Context(), []string{"./..."})
+	got, failure := loader.Checker{Dir: missing}.Check(t.Context(), []string{"./..."})
 	if _, ok := failure.(*port.Failed); !ok || got != nil {
 		t.Errorf("Check = %v, %v, want *port.Failed and no findings", got, failure)
 	}
@@ -125,7 +124,7 @@ func TestAFolderThatDoesNotExistIsFailed(t *testing.T) {
 
 func TestAModuleWithNoPackageIsFailed(t *testing.T) {
 	dir := module(t, map[string]string{})
-	got, failure := source.Checker{Report: comments.Report, Dir: dir}.Check(t.Context(), []string{"./..."})
+	got, failure := loader.Checker{Dir: dir}.Check(t.Context(), []string{"./..."})
 	failed, ok := failure.(*port.Failed)
 	if !ok || got != nil || failed.Reason != "the patterns match no package" {
 		t.Errorf("Check = %v, %v, want *port.Failed saying the patterns match no package", got, failure)
@@ -152,7 +151,7 @@ func F() { _ = C.int(1) }
 func G() {}
 `,
 	})
-	got, failure := source.Checker{Report: comments.Report, Dir: dir}.Check(t.Context(), []string{"./c"})
+	got, failure := loader.Checker{Dir: dir}.Check(t.Context(), []string{"./c"})
 	if failure != nil || len(got) != 1 || got[0].Path != filepath.Join("c", "c.go") || got[0].Line != 14 || got[0].Col != 1 {
 		t.Errorf("Check = %v, %v, want one finding at c/c.go:14:1", got, failure)
 	}

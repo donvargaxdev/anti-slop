@@ -20,13 +20,13 @@ var Analyzer = &analysis.Analyzer{
 	Name: name,
 	Doc:  "report function bodies longer than 70 lines",
 	Run: func(pass *analysis.Pass) (any, error) {
-		Report(pass.Fset, pass.Files, pass.Report)
+		reportFiles(pass.Fset, pass.Files, pass.Report)
 		return nil, nil
 	},
 }
 
-// Report checks physical lines so line directives cannot change the count.
-func Report(fset *token.FileSet, files []*ast.File, report func(analysis.Diagnostic)) {
+// reportFiles checks physical lines so line directives cannot change the count.
+func reportFiles(fset *token.FileSet, files []*ast.File, report func(analysis.Diagnostic)) {
 	for _, file := range files {
 		if ast.IsGenerated(file) {
 			continue

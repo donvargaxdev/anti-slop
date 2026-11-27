@@ -32,12 +32,11 @@ import (
 
 	"github.com/donvargaxdev/anti-slop/internal/cli"
 	checking "github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
-	"github.com/donvargaxdev/anti-slop/internal/engine/checking/source"
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/disk"
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/port"
-	commentsrule "github.com/donvargaxdev/anti-slop/internal/rules/comments"
 	funclenrule "github.com/donvargaxdev/anti-slop/internal/rules/funclen"
 	comments "github.com/donvargaxdev/anti-slop/internal/slices/comments/command"
+	commentsloader "github.com/donvargaxdev/anti-slop/internal/slices/comments/loader"
 	count "github.com/donvargaxdev/anti-slop/internal/slices/count/command"
 	"github.com/donvargaxdev/anti-slop/internal/slices/count/stdin"
 	funclen "github.com/donvargaxdev/anti-slop/internal/slices/funclen/command"
@@ -97,9 +96,9 @@ type adapters struct {
 func diskAdapters() adapters {
 	return adapters{
 		Files:    disk.Files{},
-		Comments: source.Checker{Report: commentsrule.Report},
+		Comments: commentsloader.Checker{},
 		Tests:    testsloader.Checker{},
-		Funclen:  source.Checker{Report: funclenrule.Report},
+		Funclen:  commentsloader.ForAnalyzer(funclenrule.Analyzer),
 	}
 }
 
@@ -165,7 +164,7 @@ func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Wri
 		ui.Classifiers = []cli.Classifier{tests.Classify}
 		return c.Tests.Run(ctx, ui, tests.Handler{Checker: a.Tests})
 	case "funclen":
-		ui.Classifiers = []cli.Classifier{funclen.Classify}
+		ui.Classifiers = []cli.Classifier{c.Funclen.Classify}
 		return c.Funclen.Run(ctx, ui, funclen.Handler{Checker: a.Funclen})
 	case "version":
 		// What --version prints, as kong prints it, or with --json the
