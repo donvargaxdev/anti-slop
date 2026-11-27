@@ -21,3 +21,11 @@ mutation:
       original: '>'
       replacement: '>='
       reason: compareTags returns 0 only for two identical spellings, because equal numbers give equal lengths and two strings of one length never compare equal otherwise, so taking the later of a pair it calls equal sets newest to the string it already holds.
+    - file: internal/rules/funclen/funclen.go
+      function: github.com/donvargaxdev/anti-slop/internal/rules/funclen#assignmentScopeEnd
+      hash: e46ddec1303aecc5
+      line_in_function: 2
+      column: 29
+      original: '>'
+      replacement: '>='
+      reason: caseTables starts each walk at the function body's BlockStmt, and nested walks preserve that first stack node. Visiting index zero therefore cannot find a FuncLit or change the returned scope end.
