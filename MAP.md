@@ -62,6 +62,16 @@ test command. Add an entry for each slice or domain; say where to look, not what
 - Scenarios are in `features/tests.feature`.
 - Run `go test ./internal/rules/tests/... ./internal/slices/tests/...`.
 
+## Units and qualifiers rule
+
+- Start with `internal/rules/unitslast/unitslast.go` and the CLI fixture test in
+  `internal/rules/unitslast/unitslast_test.go`.
+- Slice packages are `internal/slices/unitslast/command` and `loader`. The loader uses the
+  shared checker port and its contract suite under `internal/engine/checking/port`.
+- Scenarios are in `features/unitslast.feature`.
+- Run `go test ./internal/rules/unitslast/...` for diagnostics and
+  `go test ./cmd/anti-slop -run 'TestClassify|TestChecker'` for classification and loading.
+
 ## Conditions rule
 
 - Start with `internal/rules/conditions/conditions.go` and its CLI-tested fixtures.
