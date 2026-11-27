@@ -128,6 +128,39 @@ case bool: _ = cases
 default: cases = TABLE; _ = cases
 }
 ` + runCases, 1},
+		{"either select clause supplies cases", `
+var cases []int
+var ready chan bool
+select {
+case <-ready: cases = TABLE
+default: cases = TABLE
+}
+` + runCases, 0},
+		{"select without default overwrites earlier cases", `
+cases := TABLE
+var first, second chan bool
+select {
+case <-first: cases = TABLE
+case <-second: cases = TABLE
+}
+` + runCases, 1},
+		{"select clause cannot use a sibling's assignment", `
+var cases []int
+var ready chan bool
+select {
+case <-ready: cases = TABLE
+default: for range cases {}
+}
+`, 1},
+		{"select receive declaration shadows cases in its clause", `
+cases := TABLE
+var ready chan []int
+select {
+case cases := <-ready: for range cases {}
+default:
+}
+_ = cases
+`, 1},
 		{"earlier assignment in an arm is overwritten", `
 var cases []int
 if a { cases = TABLE; cases = TABLE } else { cases = TABLE }

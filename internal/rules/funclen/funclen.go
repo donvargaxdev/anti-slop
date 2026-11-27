@@ -106,6 +106,9 @@ func (locals caseBindings) collect(root ast.Node, stack []ast.Node, tables map[*
 		case *ast.TypeSwitchStmt:
 			locals.collectSwitch(node.Init, node.Assign, node.Body, append(stack, node), tables)
 			return false
+		case *ast.SelectStmt:
+			locals.collectSelect(node, append(stack, node, node.Body), tables)
+			return false
 		case *ast.AssignStmt:
 			for i, target := range node.Lhs {
 				if id, ok := target.(*ast.Ident); ok {
@@ -190,6 +193,17 @@ func (locals caseBindings) collectSwitch(init ast.Stmt, guard ast.Node, body *as
 		exits = append(exits, locals)
 	}
 	locals.joinBranches(body.End(), exits...)
+}
+
+func (locals caseBindings) collectSelect(node *ast.SelectStmt, stack []ast.Node, tables map[*ast.CompositeLit]struct{}) {
+	var exits []caseBindings
+	for _, clause := range node.Body.List {
+		branch := maps.Clone(locals)
+		branch.collect(clause, stack, tables)
+		exits = append(exits, branch)
+	}
+	// A select without a ready clause blocks, so only clauses supply exit bindings.
+	locals.joinBranches(node.End(), exits...)
 }
 
 func fallsThrough(clause *ast.CaseClause) bool {
