@@ -2,12 +2,14 @@ package catch
 
 import "testing"
 
-func TestLong(t *testing.T) { // want "function body is 75 lines; limit is 70"
-	for _, value := range []int{
-		1,
-		2,
-	} {
-		t.Log(value)
+func TestLong(t *testing.T) { // want "function body is 77 lines; limit is 70"
+	{
+		for _, value := range []int{
+			1,
+			2,
+		} {
+			t.Log(value)
+		}
 	}
 	_ = 0
 	_ = 0

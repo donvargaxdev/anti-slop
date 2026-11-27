@@ -61,12 +61,30 @@ func interiorLines(fset *token.FileSet, open, close token.Pos) int {
 	return max(0, fset.PositionFor(close, false).Line-fset.PositionFor(open, false).Line-1)
 }
 
-// testCaseLines counts the data between the braces of case tables ranged over
-// in a test body. The loop and its assertions still count toward the limit.
+// testCaseLines counts case data in the body and its nested blocks. The loops
+// and their assertions still count toward the limit.
 func testCaseLines(fset *token.FileSet, body *ast.BlockStmt) int {
+	lines := make(map[int]struct{})
+	for node := range ast.Preorder(body) {
+		block, ok := node.(*ast.BlockStmt)
+		if !ok {
+			continue
+		}
+		for table := range caseTables(block) {
+			open := fset.PositionFor(table.Lbrace, false).Line
+			closeLine := fset.PositionFor(table.Rbrace, false).Line
+			for line := open + 1; line < closeLine; line++ {
+				lines[line] = struct{}{}
+			}
+		}
+	}
+	return len(lines)
+}
+
+// caseTables finds inline tables and tables declared and ranged over in one block.
+func caseTables(body *ast.BlockStmt) map[*ast.CompositeLit]struct{} {
 	locals := make(map[string]*ast.CompositeLit)
-	counted := make(map[*ast.CompositeLit]bool)
-	lines := 0
+	tables := make(map[*ast.CompositeLit]struct{})
 	for _, stmt := range body.List {
 		switch stmt := stmt.(type) {
 		case *ast.AssignStmt:
@@ -87,11 +105,10 @@ func testCaseLines(fset *token.FileSet, body *ast.BlockStmt) int {
 			if id, ok := expr.(*ast.Ident); ok {
 				table = locals[id.Name]
 			}
-			if table != nil && !counted[table] {
-				lines += interiorLines(fset, table.Lbrace, table.Rbrace)
-				counted[table] = true
+			if table != nil {
+				tables[table] = struct{}{}
 			}
 		}
 	}
-	return lines
+	return tables
 }
