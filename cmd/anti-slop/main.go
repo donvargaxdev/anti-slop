@@ -31,17 +31,20 @@ import (
 	"golang.org/x/term"
 
 	"github.com/donvargaxdev/anti-slop/internal/cli"
+	"github.com/donvargaxdev/anti-slop/internal/engine/checking/loader"
 	checking "github.com/donvargaxdev/anti-slop/internal/engine/checking/port"
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/disk"
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/port"
 	conditionsrule "github.com/donvargaxdev/anti-slop/internal/rules/conditions"
+	recursionrule "github.com/donvargaxdev/anti-slop/internal/rules/recursion"
+	testsrule "github.com/donvargaxdev/anti-slop/internal/rules/tests"
 	comments "github.com/donvargaxdev/anti-slop/internal/slices/comments/command"
 	commentsloader "github.com/donvargaxdev/anti-slop/internal/slices/comments/loader"
 	conditions "github.com/donvargaxdev/anti-slop/internal/slices/conditions/command"
 	count "github.com/donvargaxdev/anti-slop/internal/slices/count/command"
 	"github.com/donvargaxdev/anti-slop/internal/slices/count/stdin"
+	recursion "github.com/donvargaxdev/anti-slop/internal/slices/recursion/command"
 	tests "github.com/donvargaxdev/anti-slop/internal/slices/tests/command"
-	testsloader "github.com/donvargaxdev/anti-slop/internal/slices/tests/loader"
 	"github.com/donvargaxdev/anti-slop/internal/version"
 )
 
@@ -60,6 +63,7 @@ type commandLine struct {
 	Comments   comments.CLI   `cmd:"" help:"Report the Go comments that no tool reads."`
 	Conditions conditions.CLI `cmd:"" help:"Report long compound if and for conditions."`
 	Tests      tests.CLI      `cmd:"" help:"Report sleeps and raw environment changes in Go test files."`
+	Recursion  recursion.CLI  `cmd:"" help:"Report direct and short Go recursion cycles."`
 	Version    cli.Version    `cmd:"" help:"Print the version and the commit it was built from."`
 	Completion cli.Completion `cmd:"" help:"Print a shell completion script."`
 	Complete   struct{}       `cmd:"" name:"__complete" hidden:""`
@@ -88,17 +92,20 @@ func main() {
 type adapters struct {
 	Files      port.Files
 	Comments   checking.Checker
-	Conditions checking.Checker
 	Tests      checking.Checker
+	Recursion  checking.Checker
+	Conditions checking.Checker
 }
 
 // diskAdapters is every port bound to the real adapter.
 func diskAdapters() adapters {
+	typed := loader.Checker{}
 	return adapters{
 		Files:      disk.Files{},
 		Comments:   commentsloader.Checker{},
+		Tests:      typed.WithAnalyzer(testsrule.Analyzer),
+		Recursion:  typed.WithAnalyzer(recursionrule.Analyzer),
 		Conditions: commentsloader.Checker{Report: commentsloader.ReportSources(conditionsrule.Analyzer)},
-		Tests:      testsloader.Checker{},
 	}
 }
 
@@ -165,6 +172,9 @@ func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Wri
 	case "tests":
 		ui.Classifiers = []cli.Classifier{tests.Classify}
 		return c.Tests.Run(ctx, ui, tests.Handler{Checker: a.Tests})
+	case "recursion":
+		ui.Classifiers = []cli.Classifier{c.Recursion.Classify}
+		return c.Recursion.Run(ctx, ui, recursion.Handler{Checker: a.Recursion})
 	case "version":
 		// What --version prints, as kong prints it, or with --json the
 		// version and commit that text is made of.

@@ -51,9 +51,11 @@ The `comments` command is the second slice, `internal/slices/comments`, and runs
   or a loader query), `Run` prints each finding as `path:line:col: comments: <reason>` and exits 0,
   since the rule only reports, and `Classify` gives the failures their problems.
 
-The `tests` slice uses the same checker port. Its loader requests type information through
-`go/packages` to resolve standard-library calls, including renamed and dot imports. The
-`internal/rules/tests` analyzer limits findings to `_test.go` files.
+The `tests` and `recursion` slices use the same checker port. The shared typed analyzer adapter
+at `internal/engine/checking/loader` requests type information through `go/packages`.
+The `internal/rules/tests` analyzer resolves standard-library calls, including renamed and dot
+imports, in `_test.go` files. The `internal/rules/recursion` analyzer reports named functions
+and methods in cycles of up to three statically resolved calls within a package.
 
 The `conditions` analyzer reports an `if` or `for` condition with more than two `&&` or `||`
 operators. The CLI assembly binds it to the checker port using the same syntax adapter as

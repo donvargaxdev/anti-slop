@@ -3163,5 +3163,19 @@
     "Import": "$module/internal/rules/newrule",
     "Kind": "allow",
     "Rule": "siblings"
+  },
+  {
+    "Name": "typed-checker-adapter-allows-the-checker-port",
+    "File": "internal/engine/checking/loader/probe.go",
+    "Import": "$module/internal/engine/checking/port",
+    "Kind": "allow",
+    "Rule": "siblings"
+  },
+  {
+    "Name": "recursion-command-refuses-the-typed-checker-adapter",
+    "File": "internal/slices/recursion/command/probe.go",
+    "Import": "$module/internal/engine/checking/loader",
+    "Kind": "graph",
+    "Rule": "siblings"
   }
 ]
