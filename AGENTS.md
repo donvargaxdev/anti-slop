@@ -12,8 +12,8 @@ document's sections 1, 2 and 9: `docs/architecture/01-introduction-and-goals.md`
 `docs/architecture/09-architecture-decisions.md`, which indexes the decision records. Before
 changing code, read sections 4, 5 and 8 too: `04-solution-strategy.md`,
 `05-building-block-view.md` and `08-crosscutting-concepts.md`.
-Shared design, testing and dependency rules are in `docs/engineering.md`. They apply to every
-stack and interface; stack and feature guides add only what is specific to them.
+Follow [the engineering rules](docs/engineering.md) for every change. They cover design,
+analyzer rules, code style, testing and dependencies across all stacks and interfaces.
 Go's packages, boundary lists, tests and quality checks are in `docs/go.md`.
 Rules for any configuration file a project owns are in `docs/CONFIG.md`.
 The command line's contract and rules are in `docs/CLI.md`.
