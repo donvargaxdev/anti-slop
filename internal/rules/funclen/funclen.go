@@ -65,50 +65,102 @@ func interiorLines(fset *token.FileSet, open, close token.Pos) int {
 // and their assertions still count toward the limit.
 func testCaseLines(fset *token.FileSet, body *ast.BlockStmt) int {
 	lines := make(map[int]struct{})
-	for node := range ast.Preorder(body) {
-		block, ok := node.(*ast.BlockStmt)
-		if !ok {
-			continue
-		}
-		for table := range caseTables(block) {
-			open := fset.PositionFor(table.Lbrace, false).Line
-			closeLine := fset.PositionFor(table.Rbrace, false).Line
-			for line := open + 1; line < closeLine; line++ {
-				lines[line] = struct{}{}
-			}
+	for table := range caseTables(body) {
+		open := fset.PositionFor(table.Lbrace, false).Line
+		closeLine := fset.PositionFor(table.Rbrace, false).Line
+		for line := open + 1; line < closeLine; line++ {
+			lines[line] = struct{}{}
 		}
 	}
 	return len(lines)
 }
 
-// caseTables finds inline tables and tables declared and ranged over in one block.
+// A nil table still shadows an earlier literal while the binding is in scope.
+type caseBinding struct {
+	start, end token.Pos
+	table      *ast.CompositeLit
+}
+
+type caseBindings map[string][]caseBinding
+
+// caseTables finds inline tables and tables introduced within the body.
 func caseTables(body *ast.BlockStmt) map[*ast.CompositeLit]struct{} {
-	locals := make(map[string]*ast.CompositeLit)
+	locals := make(caseBindings)
 	tables := make(map[*ast.CompositeLit]struct{})
-	for _, stmt := range body.List {
-		switch stmt := stmt.(type) {
+	ast.PreorderStack(body, nil, func(node ast.Node, stack []ast.Node) bool {
+		switch node := node.(type) {
 		case *ast.AssignStmt:
-			if len(stmt.Lhs) == 1 && len(stmt.Rhs) == 1 {
-				if id, ok := stmt.Lhs[0].(*ast.Ident); ok {
-					locals[id.Name], _ = ast.Unparen(stmt.Rhs[0]).(*ast.CompositeLit)
+			for i, target := range node.Lhs {
+				if id, ok := target.(*ast.Ident); ok {
+					locals.bind(id, node.Rhs, i, node.End(), caseScopeEnd(stack))
 				}
 			}
-		case *ast.DeclStmt:
-			for _, spec := range stmt.Decl.(*ast.GenDecl).Specs {
-				if value, ok := spec.(*ast.ValueSpec); ok && len(value.Names) == 1 && len(value.Values) == 1 {
-					locals[value.Names[0].Name], _ = ast.Unparen(value.Values[0]).(*ast.CompositeLit)
-				}
+		case *ast.ValueSpec:
+			for i, id := range node.Names {
+				locals.bind(id, node.Values, i, node.End(), caseScopeEnd(stack))
 			}
+		case *ast.FuncLit:
+			locals.bindFields(node.Type.Params, node.Body)
+			locals.bindFields(node.Type.Results, node.Body)
 		case *ast.RangeStmt:
-			expr := ast.Unparen(stmt.X)
-			table, _ := expr.(*ast.CompositeLit)
-			if id, ok := expr.(*ast.Ident); ok {
-				table = locals[id.Name]
-			}
-			if table != nil {
+			if table := locals.rangeTable(node.X); table != nil {
 				tables[table] = struct{}{}
+			}
+			if node.Tok == token.DEFINE {
+				for _, target := range []ast.Expr{node.Key, node.Value} {
+					if id, ok := target.(*ast.Ident); ok {
+						locals.bind(id, nil, 0, node.Body.Pos(), node.Body.End())
+					}
+				}
+			}
+		}
+		return true
+	})
+	return tables
+}
+
+func caseScopeEnd(stack []ast.Node) token.Pos {
+	for i := len(stack) - 1; i > 0; i-- {
+		switch stack[i].(type) {
+		case *ast.BlockStmt, *ast.IfStmt, *ast.ForStmt, *ast.SwitchStmt,
+			*ast.TypeSwitchStmt, *ast.CaseClause, *ast.CommClause:
+			return stack[i].End()
+		}
+	}
+	return stack[0].End()
+}
+
+func (locals caseBindings) bind(id *ast.Ident, values []ast.Expr, index int, start, end token.Pos) {
+	var table *ast.CompositeLit
+	if index < len(values) {
+		table, _ = ast.Unparen(values[index]).(*ast.CompositeLit)
+	}
+	locals[id.Name] = append(locals[id.Name], caseBinding{start, end, table})
+}
+
+func (locals caseBindings) bindFields(fields *ast.FieldList, body *ast.BlockStmt) {
+	if fields == nil {
+		return
+	}
+	for _, field := range fields.List {
+		for _, id := range field.Names {
+			locals.bind(id, nil, 0, body.Pos(), body.End())
+		}
+	}
+}
+
+func (locals caseBindings) rangeTable(expr ast.Expr) *ast.CompositeLit {
+	switch expr := ast.Unparen(expr).(type) {
+	case *ast.CompositeLit:
+		return expr
+	case *ast.Ident:
+		bindings := locals[expr.Name]
+		for i := len(bindings) - 1; i >= 0; i-- {
+			binding := bindings[i]
+			if binding.start <= expr.Pos() && expr.Pos() < binding.end {
+				return binding.table
 			}
 		}
 	}
-	return tables
+	return nil
 }
