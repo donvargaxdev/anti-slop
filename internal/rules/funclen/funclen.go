@@ -92,7 +92,13 @@ func caseTables(body *ast.BlockStmt) map[*ast.CompositeLit]struct{} {
 		case *ast.AssignStmt:
 			for i, target := range node.Lhs {
 				if id, ok := target.(*ast.Ident); ok {
-					locals.bind(id, node.Rhs, i, node.End(), caseScopeEnd(stack))
+					end := caseScopeEnd(stack)
+					if node.Tok == token.ASSIGN {
+						if binding := locals.at(id); binding.end.IsValid() {
+							end = assignmentScopeEnd(stack, binding.end)
+						}
+					}
+					locals.bind(id, node.Rhs, i, node.End(), end)
 				}
 			}
 		case *ast.ValueSpec:
@@ -130,6 +136,17 @@ func caseScopeEnd(stack []ast.Node) token.Pos {
 	return stack[0].End()
 }
 
+// A write in a function literal can affect later ranges in that literal.
+// Its source position alone cannot tell us when it runs in the enclosing body.
+func assignmentScopeEnd(stack []ast.Node, end token.Pos) token.Pos {
+	for i := len(stack) - 1; i > 0; i-- {
+		if function, ok := stack[i].(*ast.FuncLit); ok {
+			return min(end, function.Body.End())
+		}
+	}
+	return end
+}
+
 func (locals caseBindings) bind(id *ast.Ident, values []ast.Expr, index int, start, end token.Pos) {
 	var table *ast.CompositeLit
 	if index < len(values) {
@@ -154,13 +171,18 @@ func (locals caseBindings) rangeTable(expr ast.Expr) *ast.CompositeLit {
 	case *ast.CompositeLit:
 		return expr
 	case *ast.Ident:
-		bindings := locals[expr.Name]
-		for i := len(bindings) - 1; i >= 0; i-- {
-			binding := bindings[i]
-			if binding.start <= expr.Pos() && expr.Pos() < binding.end {
-				return binding.table
-			}
-		}
+		return locals.at(expr).table
 	}
 	return nil
+}
+
+func (locals caseBindings) at(id *ast.Ident) caseBinding {
+	bindings := locals[id.Name]
+	for i := len(bindings) - 1; i >= 0; i-- {
+		binding := bindings[i]
+		if binding.start <= id.Pos() && id.Pos() < binding.end {
+			return binding
+		}
+	}
+	return caseBinding{}
 }
