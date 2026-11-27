@@ -48,6 +48,86 @@ if a { cases := TABLE; _ = cases }
 		{"initializer table is visible in both arms", `
 if cases := TABLE; a { for range cases {} } else { for range cases {} }
 `, 0},
+		{"either switch case supplies cases", `
+var cases []int
+switch a {
+case true: cases = TABLE
+default: cases = TABLE
+}
+` + runCases, 0},
+		{"switch without default preserves earlier cases", `
+cases := TABLE
+switch {
+case a: cases = TABLE
+case b: cases = TABLE
+case !a:
+}
+` + runCases, 0},
+		{"exhaustive switch overwrites earlier cases", `
+cases := TABLE
+switch {
+case a: cases = TABLE
+default: cases = TABLE
+}
+` + runCases, 1},
+		{"switch case cannot use a sibling's assignment", `
+var cases []int
+switch {
+case a: cases = TABLE
+default: for range cases {}
+}
+`, 1},
+		{"switch case declaration cannot replace outer table", `
+cases := TABLE
+switch {
+case a: cases := TABLE; _ = cases
+}
+` + runCases, 1},
+		{"switch initializer table is visible in each case", `
+switch cases := TABLE; a {
+case true: for range cases {}
+default: for range cases {}
+}
+`, 0},
+		{"fallthrough carries cases into the next clause", `
+var cases []int
+switch {
+case a: cases = TABLE; fallthrough;;
+default: for range cases {}
+}
+`, 0},
+		{"labeled fallthrough carries cases into the next clause", `
+var cases []int
+switch {
+case a:
+	cases = TABLE
+	goto next
+next:
+	fallthrough
+default: for range cases {}
+}
+`, 0},
+		{"fallthrough assignment can be overwritten", `
+var cases []int
+switch {
+case a: cases = TABLE; fallthrough
+default: cases = TABLE
+}
+` + runCases, 1},
+		{"either type switch case supplies cases", `
+var cases []int
+switch any(a).(type) {
+case bool: cases = TABLE
+default: cases = TABLE
+}
+` + runCases, 0},
+		{"type switch guard shadows outer cases inside the clause", `
+cases := TABLE
+switch cases := any(a).(type) {
+case bool: _ = cases
+default: cases = TABLE; _ = cases
+}
+` + runCases, 1},
 		{"earlier assignment in an arm is overwritten", `
 var cases []int
 if a { cases = TABLE; cases = TABLE } else { cases = TABLE }

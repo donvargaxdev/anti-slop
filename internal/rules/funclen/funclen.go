@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/token"
 	"maps"
+	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -76,7 +77,7 @@ func testCaseLines(fset *token.FileSet, body *ast.BlockStmt) int {
 	return len(lines)
 }
 
-// Bindings are immutable, so branches can share the history up to the if.
+// Bindings are immutable, so branches can share their incoming history.
 // An empty table set still shadows an earlier literal while in scope.
 type caseBinding struct {
 	start, end token.Pos
@@ -98,6 +99,12 @@ func (locals caseBindings) collect(root ast.Node, stack []ast.Node, tables map[*
 		switch node := node.(type) {
 		case *ast.IfStmt:
 			locals.collectIf(node, append(stack, node), tables)
+			return false
+		case *ast.SwitchStmt:
+			locals.collectSwitch(node.Init, node.Tag, node.Body, append(stack, node), tables)
+			return false
+		case *ast.TypeSwitchStmt:
+			locals.collectSwitch(node.Init, node.Assign, node.Body, append(stack, node), tables)
 			return false
 		case *ast.AssignStmt:
 			for i, target := range node.Lhs {
@@ -146,17 +153,81 @@ func (locals caseBindings) collectIf(node *ast.IfStmt, stack []ast.Node, tables 
 	locals.joinBranches(node.End(), then, otherwise)
 }
 
-// Looking up both arms after the if drops declarations scoped to either arm.
-func (locals caseBindings) joinBranches(end token.Pos, then, otherwise caseBindings) {
-	for name := range locals {
-		left, right := then.at(name, end), otherwise.at(name, end)
-		if left == right {
+func (locals caseBindings) collectSwitch(init ast.Stmt, guard ast.Node, body *ast.BlockStmt, stack []ast.Node, tables map[*ast.CompositeLit]struct{}) {
+	if init != nil {
+		locals.collect(init, stack, tables)
+	}
+	if guard != nil {
+		locals.collect(guard, stack, tables)
+	}
+
+	var exits []caseBindings
+	var falling caseBindings
+	hasDefault := false
+	stack = append(stack, body)
+	for _, stmt := range body.List {
+		clause := stmt.(*ast.CaseClause)
+		clauseStack := append(stack, clause)
+		hasDefault = hasDefault || clause.List == nil
+		for _, expr := range clause.List {
+			locals.collect(expr, clauseStack, tables)
+		}
+		branch := maps.Clone(locals)
+		if falling != nil {
+			branch.joinBranches(clause.Pos(), locals, falling)
+		}
+		for _, stmt := range clause.Body {
+			branch.collect(stmt, clauseStack, tables)
+		}
+		falling = nil
+		if fallsThrough(clause) {
+			falling = branch
+		} else {
+			exits = append(exits, branch)
+		}
+	}
+	if !hasDefault {
+		exits = append(exits, locals)
+	}
+	locals.joinBranches(body.End(), exits...)
+}
+
+func fallsThrough(clause *ast.CaseClause) bool {
+	for _, stmt := range slices.Backward(clause.Body) {
+		if _, empty := stmt.(*ast.EmptyStmt); empty {
 			continue
 		}
-		tables := make(map[*ast.CompositeLit]struct{}, len(left.tables)+len(right.tables))
-		maps.Copy(tables, left.tables)
-		maps.Copy(tables, right.tables)
-		locals[name] = &caseBinding{end, min(left.end, right.end), tables, locals[name]}
+		for label, ok := stmt.(*ast.LabeledStmt); ok; label, ok = stmt.(*ast.LabeledStmt) {
+			stmt = label.Stmt
+		}
+		last, ok := stmt.(*ast.BranchStmt)
+		return ok && last.Tok == token.FALLTHROUGH
+	}
+	return false
+}
+
+// Looking up bindings at the join drops declarations scoped to a branch.
+func (locals caseBindings) joinBranches(end token.Pos, branches ...caseBindings) {
+	for name, previous := range locals {
+		incoming := locals.at(name, end)
+		if incoming == nil {
+			continue
+		}
+		var tables map[*ast.CompositeLit]struct{}
+		for _, branch := range branches {
+			binding := branch.at(name, end)
+			if binding != incoming {
+				tables = make(map[*ast.CompositeLit]struct{})
+				break
+			}
+		}
+		if tables == nil {
+			continue
+		}
+		for _, branch := range branches {
+			maps.Copy(tables, branch.at(name, end).tables)
+		}
+		locals[name] = &caseBinding{end, incoming.end, tables, previous}
 	}
 }
 
