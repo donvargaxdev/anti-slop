@@ -1,354 +1,57 @@
 package main
 
 import (
-	"bytes"
-	"os"
-	"path/filepath"
+	"fmt"
 	"strings"
 	"testing"
 )
 
-func TestCaseTableBindings(t *testing.T) {
-	table := "[]int{\n" + strings.Repeat("0,\n", 71) + "}"
-	const runCases = "\nfor range cases {}\n"
+func TestCaseTableSyntax(t *testing.T) {
+	const table = "[]int{\n0,\n1,\n}"
+	const data = "[]int{\n0,\n// comment between cases\n\n1,\n}"
+	longCases := "[]int{\n" + strings.Repeat("0,\n", 71) + "}"
 	for _, tc := range []struct {
 		name string
 		body string
 		want int
 	}{
-		{"either arm supplies cases", `
-var cases []int
-if a { cases = TABLE } else { cases = TABLE }
-` + runCases, 0},
-		{"optional assignment preserves earlier cases", `
-cases := TABLE
-if a { cases = TABLE }
-` + runCases, 0},
-		{"else if supplies another table", `
-var cases []int
-if a { cases = TABLE } else if b { cases = TABLE } else { cases = TABLE }
-` + runCases, 0},
-		{"both arms overwrite the earlier table", `
-cases := TABLE
-if a { cases = TABLE } else { cases = TABLE }
-` + runCases, 1},
-		{"later assignment overwrites both arms", `
-var cases []int
-if a { cases = TABLE } else { cases = TABLE }
-cases = nil
-` + runCases, 1},
-		{"range in else cannot use then assignment", `
-var cases []int
-if a { cases = TABLE } else { for range cases {} }
-`, 1},
-		{"branch declaration cannot replace outer table", `
-cases := TABLE
-if a { cases := TABLE; _ = cases }
-` + runCases, 1},
-		{"initializer table is visible in both arms", `
-if cases := TABLE; a { for range cases {} } else { for range cases {} }
-`, 0},
-		{"either switch case supplies cases", `
-var cases []int
-switch a {
-case true: cases = TABLE
-default: cases = TABLE
-}
-` + runCases, 0},
-		{"switch without default preserves earlier cases", `
-cases := TABLE
-switch {
-case a: cases = TABLE
-case b: cases = TABLE
-case !a:
-}
-` + runCases, 0},
-		{"exhaustive switch overwrites earlier cases", `
-cases := TABLE
-switch {
-case a: cases = TABLE
-default: cases = TABLE
-}
-` + runCases, 1},
-		{"switch case cannot use a sibling's assignment", `
-var cases []int
-switch {
-case a: cases = TABLE
-default: for range cases {}
-}
-`, 1},
-		{"switch case declaration cannot replace outer table", `
-cases := TABLE
-switch {
-case a: cases := TABLE; _ = cases
-}
-` + runCases, 1},
-		{"switch initializer table is visible in each case", `
-switch cases := TABLE; a {
-case true: for range cases {}
-default: for range cases {}
-}
-`, 0},
-		{"fallthrough carries cases into the next clause", `
-var cases []int
-switch {
-case a: cases = TABLE; fallthrough;;
-default: for range cases {}
-}
-`, 0},
-		{"labeled fallthrough carries cases into the next clause", `
-var cases []int
-switch {
-case a:
-	cases = TABLE
-	goto next
-next:
-	fallthrough
-default: for range cases {}
-}
-`, 0},
-		{"fallthrough assignment can be overwritten", `
-var cases []int
-switch {
-case a: cases = TABLE; fallthrough
-default: cases = TABLE
-}
-` + runCases, 1},
-		{"either type switch case supplies cases", `
-var cases []int
-switch any(a).(type) {
-case bool: cases = TABLE
-default: cases = TABLE
-}
-` + runCases, 0},
-		{"type switch guard shadows outer cases inside the clause", `
-cases := TABLE
-switch cases := any(a).(type) {
-case bool: _ = cases
-default: cases = TABLE; _ = cases
-}
-` + runCases, 1},
-		{"either select clause supplies cases", `
-var cases []int
-var ready chan bool
-select {
-case <-ready: cases = TABLE
-default: cases = TABLE
-}
-` + runCases, 0},
-		{"select without default overwrites earlier cases", `
-cases := TABLE
-var first, second chan bool
-select {
-case <-first: cases = TABLE
-case <-second: cases = TABLE
-}
-` + runCases, 1},
-		{"select clause cannot use a sibling's assignment", `
-var cases []int
-var ready chan bool
-select {
-case <-ready: cases = TABLE
-default: for range cases {}
-}
-`, 1},
-		{"select receive declaration shadows cases in its clause", `
-cases := TABLE
-var ready chan []int
-select {
-case cases := <-ready: for range cases {}
-default:
-}
-_ = cases
-`, 1},
-		{"earlier assignment in an arm is overwritten", `
-var cases []int
-if a { cases = TABLE; cases = TABLE } else { cases = TABLE }
-` + runCases, 1},
-		{"short declaration aliases a table", `
-cases := TABLE
-alias := cases
-for range alias {}
-`, 0},
-		{"var initializer and assignment carry the table through aliases", `
-cases := TABLE
-var alias = (cases)
-var final []int
-final = alias
-cases = nil
-for range final {}
-`, 0},
-		{"alias can refer to a table from either branch", `
-var cases []int
-if a { cases = TABLE } else { cases = TABLE }
-alias := cases
-for range alias {}
-`, 0},
-		{"assigning an unrelated slice clears an alias", `
-cases := TABLE
-alias := cases
-var other []int
-alias = other
-for range alias {}
-`, 1},
-		{"shadowed source does not supply the outer table", `
-cases := TABLE
-if a {
-	var cases []int
-	alias := cases
-	for range alias {}
-}
-_ = cases
-`, 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			const header = "package example\nfunc test(a, b bool) {\n"
-			source := header + strings.ReplaceAll(tc.body, "TABLE", table) + "}\n"
-			assertCaseTableDiagnostics(t, source, tc.want)
-		})
-	}
-}
-
-func TestCaseTableLoopBindings(t *testing.T) {
-	table := "[]int{\n" + strings.Repeat("0,\n", 71) + "}"
-	const runCases = "\nfor range cases {}\n"
-	for _, tc := range []struct {
-		name string
-		body string
-		want int
-	}{
-		{"for body may not run", `
-cases := TABLE
-for i := 0; i < n; i++ { cases = nil }
-` + runCases, 0},
-		{"range body may not run", `
-cases := TABLE
-for range n { cases = nil }
-` + runCases, 0},
-		{"for initializer always runs", `
-cases := TABLE
-for cases = nil; n > 0; n-- {}
-` + runCases, 1},
-		{"for post runs after the body", `
-cases := TABLE
-for ; n > 0; cases = nil { for range cases {}; n-- }
-`, 0},
-		{"for post can supply a second table", `
-cases := TABLE
-for ; n > 0; cases = TABLE { n-- }
-` + runCases, 0},
-		{"for without a condition runs its body", `
-cases := TABLE
-for { cases = nil; break }
-` + runCases, 1},
-		{"loop body can supply a second table", `
-cases := TABLE
-for range n { cases = TABLE }
-` + runCases, 0},
-		{"loop declaration cannot replace outer table", `
-cases := TABLE
-for _, cases := range [][]int{nil} { cases = TABLE; _ = cases }
-` + runCases, 1},
-		{"for body reads a table from the previous iteration", `
-var cases []int
-for i := 0; i < 2; i++ {
-	for range cases {}
-	cases = TABLE
-}
-`, 0},
-		{"range body reads a table after two back edges", `
-var cases, next []int
-for range 3 {
-	for range cases {}
-	cases = next
-	next = TABLE
-}
-`, 0},
-		{"for body reads an initializer variable set by the previous post", `
-for cases := []int(nil); n > 0; cases = TABLE {
-	for range cases {}
-	n--
-}
-`, 0},
-		{"for post carries a table assigned in the body", `
-var cases, next []int
-for ; n > 0; cases = next {
-	for range cases {}
-	next = TABLE
-	n--
-}
-`, 0},
-		{"for post clears the table before it can carry over", `
-var cases []int
-for ; n > 0; cases = nil {
-	for range cases {}
-	cases = TABLE
-	n--
-}
-`, 1},
-		{"range variable is rebound on each iteration", `
-for _, cases := range [][]int{nil, nil} {
-	for range cases {}
-	cases = TABLE
-}
-`, 1},
-		{"range assignment overwrites the value on each iteration", `
-cases := TABLE
-for _, cases = range [][]int{nil, nil} {
-	for range cases {}
-	cases = TABLE
-}
-`, 1},
-		{"range assignment evaluates its target before overwriting the value", `
-var cases []int
-var indices [1]int
-for indices[func() int { for range cases {}; return 0 }()], cases = range [][]int{nil, nil} {
-	cases = TABLE
-}
-`, 0},
-		{"range assignment overwrites a parenthesized key", `
-cases := TABLE
-var ready chan []int
-for (cases) = range ready { for range cases {} }
-`, 1},
-		{"range assignment keeps body writes visible after the loop", `
-var cases []int
-for _, cases = range [][]int{nil} { cases = TABLE }
-` + runCases, 0},
-		{"loop body declaration does not carry into an outer variable", `
-var cases []int
-for ; n > 0; n-- {
-	for range cases {}
-	cases := TABLE
-	_ = cases
-}
-`, 1},
+		{"inline boundary", strings.Repeat("_ = n\n", 65) +
+			"for _, v := range " + table + " {\n_ = v\n_ = n\n}\n", 0},
+		{"inline loop body exceeds limit", strings.Repeat("_ = n\n", 66) +
+			"for _, v := range " + table + " {\n_ = v\n_ = n\n}\n", 71},
+		{"adjacent declaration boundary", strings.Repeat("_ = n\n", 65) +
+			"cases := " + table + "\nfor _, v := range cases {\n_ = v\n}\n", 0},
+		{"adjacent declaration exceeds limit", strings.Repeat("_ = n\n", 66) +
+			"cases := " + table + "\nfor _, v := range cases {\n_ = v\n}\n", 71},
+		{"comment and blank lines between cases count", strings.Repeat("_ = n\n", 65) +
+			"for _, v := range " + data + " {\n_ = v\n}\n", 71},
+		{"opening brace line counts even with a case", strings.Repeat("_ = n\n", 67) +
+			"for range []int{0,\n1,\n} {\n_ = n\n}\n", 71},
+		{"closing brace line counts even with a case", strings.Repeat("_ = n\n", 67) +
+			"for range []int{\n0,\n1} {\n_ = n\n}\n", 71},
+		{"all lines of a multiline case are exempt", strings.Repeat("_ = n\n", 66) +
+			"for range [][]int{\n{\n0,\n1,\n},\n} {\n_ = n\n}\n", 0},
+		{"alias counts", "cases := " + longCases + "\nalias := cases\nfor range alias {}\n", 75},
+		{"slice expression counts", "cases := " + longCases + "\nfor range cases[1:] {}\n", 74},
+		{"intervening setup counts", "cases := " + longCases + "\n_ = n\nfor range cases {}\n", 75},
+		{"declaration outside the loop block counts", "cases := " + longCases +
+			"\nif n > 0 {\nfor range cases {}\n}\n", 76},
+		{"assignment before a range counts", "var cases []int\ncases = " + longCases +
+			"\nfor range cases {}\n", 75},
+		{"multiple declared names count", "cases, other := " + longCases +
+			", n\nfor range cases {}\n_ = other\n", 75},
+		{"range of another variable counts", "other := []int{n}\ncases := " + longCases +
+			"\nfor range other {}\n_ = cases\n", 76},
+		{"assignment through a loop with an early exit counts", "var cases []int\n" +
+			"for range n {\nif n > 1 { break }\ncases = " + longCases + "\n}\nfor range cases {}\n", 78},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const header = "package example\nfunc test(n int) {\n"
-			source := header + strings.ReplaceAll(tc.body, "TABLE", table) + "}\n"
-			assertCaseTableDiagnostics(t, source, tc.want)
+			var want string
+			if tc.want != 0 {
+				want = fmt.Sprintf("cases_test.go:2:1: funclen: function body is %d lines; limit is 70\n", tc.want)
+			}
+			assertFunctionLengthOutput(t, "cases_test.go", header+tc.body+"}\n", want)
 		})
-	}
-}
-
-func assertCaseTableDiagnostics(t *testing.T, source string, want int) {
-	t.Helper()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.test/m\n\ngo 1.27\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "cases_test.go"), []byte(source), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(dir)
-
-	var stdout, stderr bytes.Buffer
-	code := run(t.Context(), []string{"funclen", "./..."}, strings.NewReader(""), &stdout, &stderr, diskAdapters())
-	if code != 0 || stderr.Len() != 0 {
-		t.Fatalf("funclen: want exit 0 and empty stderr, got %d, stderr %q", code, stderr.String())
-	}
-	if got := strings.Count(stdout.String(), ": funclen: "); got != want {
-		t.Errorf("got %d diagnostics, want %d: %q", got, want, stdout.String())
 	}
 }

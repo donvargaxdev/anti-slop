@@ -62,6 +62,20 @@ The `conditions` analyzer reports an `if` or `for` condition with more than two 
 operators. The CLI assembly binds it to the checker port using the same syntax adapter as
 `comments`. Its must-catch and must-leave fixtures run through the CLI.
 
+`anti-slop funclen` reports a function, method or function literal with more than 70 physical
+lines between its body braces. The brace lines of the body are outside the count. Generated
+files are skipped. The command prints `path:line:col: funclen: <reason>` and exits 0 on findings.
+
+In `_test.go` files, the rule recognizes a case literal written directly in the range expression,
+as in `for _, tc := range []testCase{…}`. It also recognizes a single-variable short declaration
+such as `cases := []testCase{…}` when the next statement in that statement list ranges over
+`cases`. Only the lines spanned by the elements inside the literal's brace lines are exempt.
+The literal's brace lines, blank lines and comments between elements, setup, loop and assertions
+all count. A body with 70 counted lines passes. A body with 71 is reported.
+
+An alias, a slice expression such as `range cases[1:]`, an intervening statement, or an
+assignment inside a loop with an early exit leaves the literal's lines in the count.
+
 Around them:
 
 - `internal/cli` is the UI every slice shares. It imports nothing of the project's: it turns

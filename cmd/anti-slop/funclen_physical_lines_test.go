@@ -21,6 +21,13 @@ func TestCaseTableUsesPhysicalLines(t *testing.T) {
 	assertFunctionLengthOutput(t, "cases_test.go", source, "")
 }
 
+func TestProductionFunctionCountsCaseData(t *testing.T) {
+	source := "package example\nfunc cases() {\nfor range []int{\n" +
+		strings.Repeat("0,\n", 68) + "} {\n}\n}\n"
+	const want = "cases.go:2:1: funclen: function body is 71 lines; limit is 70\n"
+	assertFunctionLengthOutput(t, "cases.go", source, want)
+}
+
 func assertFunctionLengthOutput(t *testing.T, filename, source, want string) {
 	t.Helper()
 	dir := t.TempDir()

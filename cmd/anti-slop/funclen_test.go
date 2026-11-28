@@ -75,7 +75,7 @@ func TestFunctionLengthClassifyCheckerFailures(t *testing.T) {
 	}
 }
 
-func TestFunctionLength(t *testing.T) {
+func TestFunctionLengthFixtures(t *testing.T) {
 	t.Chdir(filepath.Join("..", ".."))
 	const fixtures = "internal/rules/funclen/testdata/src/"
 	for _, tc := range []struct {
@@ -83,6 +83,7 @@ func TestFunctionLength(t *testing.T) {
 		want []string
 	}{
 		{"catch", []string{
+			"assignment_test.go:5:1: funclen: function body is 82 lines; limit is 70",
 			"catch.go:3:1: funclen: function body is 71 lines; limit is 70",
 			"catch.go:77:1: funclen: function body is 72 lines; limit is 70",
 			"catch.go:154:16: funclen: function body is 71 lines; limit is 70",
@@ -94,15 +95,13 @@ func TestFunctionLength(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			args := []string{"funclen", "./" + fixtures + tc.name + "/..."}
 			code := run(t.Context(), args, strings.NewReader(""), &stdout, &stderr, diskAdapters())
-			if code != 0 || stderr.Len() != 0 {
-				t.Fatalf("funclen %s: want exit 0 and empty stderr, got %d, stderr %q", tc.name, code, stderr.String())
-			}
 			var want strings.Builder
 			for _, line := range tc.want {
 				want.WriteString(filepath.FromSlash(fixtures+tc.name+"/") + line + "\n")
 			}
-			if stdout.String() != want.String() {
-				t.Errorf("stdout = %q, want %q", stdout.String(), want.String())
+			if code != 0 || stderr.Len() != 0 || stdout.String() != want.String() {
+				t.Errorf("funclen exited %d, stdout %q, stderr %q; want exit 0, stdout %q and empty stderr",
+					code, stdout.String(), stderr.String(), want.String())
 			}
 		})
 	}

@@ -76,13 +76,13 @@ func TestTable(t *testing.T) {
 		{69},
 		{70},
 	}
-	t.Run("cases", func(t *testing.T) {
-		for _, tc := range cases {
+	for _, tc := range cases {
+		t.Run("case", func(t *testing.T) {
 			if tc.value < 0 {
 				t.Error(tc.value)
 			}
-		}
-	})
+		})
+	}
 }
 
 func TestInlineTable(t *testing.T) {
@@ -163,8 +163,8 @@ func TestInlineTable(t *testing.T) {
 	}
 }
 
-func TestVariableTable(t *testing.T) {
-	var cases = map[int]string{
+func TestMapTable(t *testing.T) {
+	cases := map[int]string{
 		0:  "",
 		1:  "",
 		2:  "",
@@ -237,16 +237,7 @@ func TestVariableTable(t *testing.T) {
 		69: "",
 		70: "",
 	}
-	{
-		cases := []string{"shadow"}
-		t.Log(cases)
-	}
-	if len(cases) != 0 {
-		for key := range cases {
-			t.Log(key)
-		}
-		for _, value := range cases {
-			t.Log(value)
-		}
+	for key, value := range cases {
+		t.Log(key, value)
 	}
 }
