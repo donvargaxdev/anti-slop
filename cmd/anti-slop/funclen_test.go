@@ -36,7 +36,7 @@ func functionLengthClassifier(t *testing.T) cli.Classifier {
 	return nil
 }
 
-func TestClassifyDeclinesUnrelatedErrors(t *testing.T) {
+func TestFunctionLengthClassifyDeclinesUnrelatedErrors(t *testing.T) {
 	classify := functionLengthClassifier(t)
 	if problems, ok := classify(errors.New("unrelated")); ok || problems != nil {
 		t.Errorf("Classify(unrelated) = %v, %v, want nil, false", problems, ok)
@@ -46,7 +46,7 @@ func TestClassifyDeclinesUnrelatedErrors(t *testing.T) {
 // Embedding lets the test exercise the fallback for an unknown checker failure.
 type unexpectedFailure struct{ *port.Failed }
 
-func TestClassifyCheckerFailures(t *testing.T) {
+func TestFunctionLengthClassifyCheckerFailures(t *testing.T) {
 	classify := functionLengthClassifier(t)
 	for _, tc := range []struct {
 		name    string
