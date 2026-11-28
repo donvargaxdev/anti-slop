@@ -69,16 +69,21 @@ files are skipped. The command prints `path:line:col: funclen: <reason>` and exi
 In `_test.go` files, the rule recognizes case literals written directly in a range
 expression, as in `for _, tc := range []testCase{…}`. It also recognizes
 `cases := []testCase{…}` immediately followed in the same statement list by
-`for _, tc := range cases`, including when the range has a label. A full slice
-such as `cases[:]` still ranges over the entire table. One short declaration
-such as `alias := cases` can sit between the literal and the range over `alias`.
-Each declaration and loop must appear in the same statement list.
+`for _, tc := range cases`, including when the range has a label. An adjacent
+block, `if` branch or `for` body can begin with that range, as can the callback
+of an adjacent `t.Run` call. The `if` and `for` headers in this pattern have no
+initializer, and the callback keeps the outer table name in scope.
+
+An `if` without an initializer immediately before the range can also supply the
+table. A branch qualifies when its sole statement assigns the literal to the
+ranged variable, as in `cases = []testCase{…}`. Both branches can qualify.
 
 A conditionless loop between the declaration and range can preserve the declared
 table when its first statement is an `if` whose body is a bare `break`. The loop
 and the `if` must have no initializer, so that the break can precede a later
-overwrite such as `cases = nil`. Literal lines count for bounded slices such as
-`cases[1:]`, longer alias chains, and table literals assigned within a loop.
+overwrite such as `cases = nil`. Literal lines count when the range uses an
+alias or a slice expression such as `cases[:]` or `cases[1:]`. Table literals
+assigned within a loop also count.
 
 Only the physical lines spanned by case elements inside the literal's brace
 lines are exempt. The literal's brace lines, blank lines and comments between

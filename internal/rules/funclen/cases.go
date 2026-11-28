@@ -27,11 +27,94 @@ func caseTables(file *ast.File) tables {
 }
 
 func (found tables) addAdjacent(statements []ast.Stmt) {
-	for i, stmt := range statements {
-		if loop, ok := unlabel(stmt).(*ast.RangeStmt); ok {
-			if table := adjacentCaseTable(statements[:i], loop.X); table != nil {
+	for i := 1; i < len(statements); i++ {
+		previous := statements[i-1]
+		current := unlabel(statements[i])
+		if name, table := assignedLiteral(previous, token.DEFINE); table != nil && leadsToRange(current, name) {
+			found[table] = struct{}{}
+		}
+		loop, ok := current.(*ast.RangeStmt)
+		if !ok {
+			continue
+		}
+		name := rangedName(loop.X)
+		if i >= 2 && startsWithBreak(previous) {
+			declared, table := assignedLiteral(statements[i-2], token.DEFINE)
+			if table != nil && declared == name {
 				found[table] = struct{}{}
 			}
+		}
+		found.addConditionalAssignments(previous, name)
+	}
+}
+
+func leadsToRange(statement ast.Stmt, name string) bool {
+	pending := []ast.Stmt{statement}
+	for len(pending) > 0 {
+		current := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		switch current := unlabel(current).(type) {
+		case *ast.RangeStmt:
+			if rangedName(current.X) == name {
+				return true
+			}
+		case *ast.BlockStmt:
+			if len(current.List) > 0 {
+				pending = append(pending, current.List[0])
+			}
+		case *ast.IfStmt:
+			if current.Init == nil {
+				pending = append(pending, current.Body, current.Else)
+			}
+		case *ast.ForStmt:
+			if current.Init == nil {
+				pending = append(pending, current.Body)
+			}
+		case *ast.ExprStmt:
+			if body := subtestBody(current.X, name); body != nil {
+				pending = append(pending, body)
+			}
+		}
+	}
+	return false
+}
+
+func subtestBody(expression ast.Expr, name string) *ast.BlockStmt {
+	call, ok := expression.(*ast.CallExpr)
+	if !ok || len(call.Args) != 2 {
+		return nil
+	}
+	method, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || method.Sel.Name != "Run" {
+		return nil
+	}
+	callback, ok := ast.Unparen(call.Args[1]).(*ast.FuncLit)
+	if !ok {
+		return nil
+	}
+	for _, field := range callback.Type.Params.List {
+		for _, parameter := range field.Names {
+			if parameter.Name == name {
+				return nil
+			}
+		}
+	}
+	return callback.Body
+}
+
+func (found tables) addConditionalAssignments(statement ast.Stmt, name string) {
+	conditional, ok := unlabel(statement).(*ast.IfStmt)
+	if !ok || conditional.Init != nil {
+		return
+	}
+	otherwise, _ := conditional.Else.(*ast.BlockStmt)
+	for _, branch := range []*ast.BlockStmt{conditional.Body, otherwise} {
+		if branch == nil || len(branch.List) != 1 {
+			continue
+		}
+		assigned, table := assignedLiteral(branch.List[0], token.ASSIGN)
+		if table != nil && assigned == name {
+			found[table] = struct{}{}
 		}
 	}
 }
@@ -46,55 +129,26 @@ func unlabel(statement ast.Stmt) ast.Stmt {
 	}
 }
 
-func adjacentCaseTable(before []ast.Stmt, expression ast.Expr) *ast.CompositeLit {
-	name := rangedName(expression)
-	count := len(before)
-	if name == "" || count == 0 {
-		return nil
-	}
-	previous := before[count-1]
-	if value := declaredValue(previous, name); value != nil {
-		if table := caseLiteral(value); table != nil {
-			return table
-		}
-		aliasOf, ok := ast.Unparen(value).(*ast.Ident)
-		if ok && count >= 2 {
-			return caseLiteral(declaredValue(before[count-2], aliasOf.Name))
-		}
-	}
-	if count >= 2 && startsWithBreak(previous) {
-		return caseLiteral(declaredValue(before[count-2], name))
-	}
-	return nil
-}
-
 func rangedName(expression ast.Expr) string {
-	expression = ast.Unparen(expression)
-	if slice, ok := expression.(*ast.SliceExpr); ok {
-		if slice.Low != nil || slice.High != nil {
-			return ""
-		}
-		expression = ast.Unparen(slice.X)
-	}
-	if name, ok := expression.(*ast.Ident); ok {
+	if name, ok := ast.Unparen(expression).(*ast.Ident); ok {
 		return name.Name
 	}
 	return ""
 }
 
-func declaredValue(statement ast.Stmt, name string) ast.Expr {
-	declaration, ok := statement.(*ast.AssignStmt)
-	if !ok || declaration.Tok != token.DEFINE {
-		return nil
+func assignedLiteral(statement ast.Stmt, operator token.Token) (string, *ast.CompositeLit) {
+	assignment, ok := unlabel(statement).(*ast.AssignStmt)
+	if !ok || assignment.Tok != operator {
+		return "", nil
 	}
-	if len(declaration.Lhs) != 1 || len(declaration.Rhs) != 1 {
-		return nil
+	if len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 {
+		return "", nil
 	}
-	local, ok := declaration.Lhs[0].(*ast.Ident)
-	if !ok || local.Name != name {
-		return nil
+	local, ok := assignment.Lhs[0].(*ast.Ident)
+	if !ok {
+		return "", nil
 	}
-	return declaration.Rhs[0]
+	return local.Name, caseLiteral(assignment.Rhs[0])
 }
 
 func startsWithBreak(statement ast.Stmt) bool {

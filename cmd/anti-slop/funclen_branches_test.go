@@ -36,16 +36,18 @@ func TestCaseTableSyntax(t *testing.T) {
 			"for range []int{\n0,\n1} {\n_ = n\n}\n", 71},
 		{"all lines of a multiline case are exempt", strings.Repeat("_ = n\n", 66) +
 			"for range [][]int{\n{\n0,\n1,\n},\n} {\n_ = n\n}\n", 0},
-		{"local alias", "cases := " + longCases + "\nalias := cases\nfor range alias {}\n", 0},
+		{"local alias counts", "cases := " + longCases + "\nalias := cases\nfor range alias {}\n", 75},
 		{"alias of another variable counts", "other := []int{n}\ncases := " + longCases +
 			"\nalias := other\nfor range alias {}\n_ = cases\n", 77},
 		{"slice expression counts", "cases := " + longCases + "\nfor range cases[1:] {}\n", 74},
-		{"full slice expression", "cases := " + longCases + "\nfor range cases[:] {}\n", 0},
+		{"full slice expression counts", "cases := " + longCases + "\nfor range cases[:] {}\n", 74},
 		{"bounded slice expression counts", "cases := " + longCases + "\nfor range cases[:1] {}\n", 74},
 		{"three-index slice expression counts", "cases := " + longCases + "\nfor range cases[:1:1] {}\n", 74},
 		{"intervening setup", "cases := " + longCases + "\n_ = n\nfor range cases {}\n", 75},
-		{"declaration outside the loop block", "cases := " + longCases +
-			"\nif n > 0 {\nfor range cases {}\n}\n", 76},
+		{"if initializer shadows the table", "cases := " + longCases +
+			"\nif cases := []int{n}; n > 0 {\nfor range cases {}\n}\n_ = cases\n", 77},
+		{"branch-local declaration counts", "cases := []int{n}\nif n > 0 {\ncases := " + longCases +
+			"\nfor range cases[1:] {}\n}\nfor range cases {}\n", 78},
 		{"assignment before a range", "var cases []int\ncases = " + longCases +
 			"\nfor range cases {}\n", 75},
 		{"multiple declared names", "cases, other := " + longCases +
@@ -93,6 +95,43 @@ func TestLabeledCaseRangeCountsLabelAndAssertions(t *testing.T) {
 		const want = "cases_test.go:2:1: funclen: function body is 71 lines; limit is 70\n"
 		assertFunctionLengthOutput(t, "cases_test.go", source, want)
 	})
+}
+
+func TestConditionalCaseTableSyntax(t *testing.T) {
+	const header = "package example\nfunc test(n int) {\n"
+	const loop = "for _, value := range cases {\nif value != n {\n_ = value\n}\n}\n"
+	table := "[]int{\n" + strings.Repeat("0,\n", 71) + "}\n"
+	for _, tc := range []struct {
+		name string
+		body string
+		fill int
+	}{
+		{"range in if", "cases := " + table + "if n > 0 {\n" + loop + "}\n", 61},
+		{"range in else", "cases := " + table + "if n > 0 {\n} else {\n" + loop + "}\n", 60},
+		{"range in nested for", "cases := " + table + "if n > 0 {\nfor n > 0 {\n" +
+			loop + "n--\n}\n}\n", 58},
+		{"assignment in if", "var cases []int\nif n > 0 {\ncases = " + table + "}\n" + loop, 60},
+		{"assignments in both branches", "var cases []int\nif n > 0 {\ncases = " + table +
+			"} else {\ncases = " + table + "}\n" + loop, 57},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := header + strings.Repeat("_ = n\n", tc.fill)
+			assertFunctionLengthOutput(t, "cases_test.go", source+tc.body+"}\n", "")
+			const want = "cases_test.go:2:1: funclen: function body is 71 lines; limit is 70\n"
+			assertFunctionLengthOutput(t, "cases_test.go", source+"_ = n\n"+tc.body+"}\n", want)
+		})
+	}
+}
+
+func TestSubtestRangesOverEnclosingCaseTable(t *testing.T) {
+	const header = "package example\nimport \"testing\"\nfunc TestCases(t *testing.T) {\n"
+	table := "cases := []int{\n" + strings.Repeat("0,\n", 71) + "}\n"
+	const subtest = "t.Run(\"cases\", func(t *testing.T) {\nfor _, value := range cases {\n" +
+		"if value < 0 {\nt.Fatal(value)\n}\n}\n})\n"
+	source := header + strings.Repeat("_ = t\n", 61) + table + subtest
+	assertFunctionLengthOutput(t, "cases_test.go", source+"}\n", "")
+	const want = "cases_test.go:3:1: funclen: function body is 71 lines; limit is 70\n"
+	assertFunctionLengthOutput(t, "cases_test.go", source+"_ = t\n}\n", want)
 }
 
 func TestNestedCaseTableSyntax(t *testing.T) {
