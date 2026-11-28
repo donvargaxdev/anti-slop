@@ -2,11 +2,82 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestInteriorLines(t *testing.T) {
+	const header = "package example\nfunc cases() {\n"
+	const table = "for range []int{\n1,\n\n2,\n} {\n}\n}\n"
+	const want = "cases_test.go:2:1: funclen: function body is 71 lines; limit is 70\n"
+	if !t.Run("71 counted lines", func(t *testing.T) {
+		assertFunctionLengthOutput(t, "cases_test.go", header+strings.Repeat("_ = 0\n", 67)+table, want)
+	}) {
+		return
+	}
+	t.Run("70 counted lines", func(t *testing.T) {
+		assertFunctionLengthOutput(t, "cases_test.go", header+strings.Repeat("_ = 0\n", 66)+table, "")
+	})
+	t.Run("empty body", assertEmptyBodyLineCount)
+}
+
+// The reporting threshold hides a zero-to-one miscount. Overlay a same-package
+// test for the exact count after the CLI assertion has established the rule exists.
+func assertEmptyBodyLineCount(t *testing.T) {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const name = "interior_lines_test.go"
+	rule := filepath.Join(root, "internal", "rules", "funclen")
+	dir := t.TempDir()
+	probe := filepath.Join(dir, name)
+	if err := os.WriteFile(probe, []byte(emptyBodyProbe), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	overlay, err := json.Marshal(struct {
+		Replace map[string]string
+	}{Replace: map[string]string{filepath.Join(rule, name): probe}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "overlay.json")
+	if err := os.WriteFile(file, overlay, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(t.Context(), "go", "test", "-overlay", file, "-run", "^TestEmptyBodyLineCount$", ".")
+	cmd.Dir = rule
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("empty body line count: %v\n%s", err, output)
+	}
+}
+
+const emptyBodyProbe = `package funclen
+
+import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"testing"
+)
+
+func TestEmptyBodyLineCount(t *testing.T) {
+	fset := token.NewFileSet()
+	expr, err := parser.ParseExprFrom(fset, "body.go", "func() {}", parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := expr.(*ast.FuncLit).Body
+	if got := interiorLines(fset, body.Lbrace, body.Rbrace); got != 0 {
+		t.Errorf("empty body has %d interior lines, want 0", got)
+	}
+}
+`
 
 func TestFunctionBodyUsesPhysicalLines(t *testing.T) {
 	source := "package example\n//line body.go:1000\nfunc long() {\n" +
