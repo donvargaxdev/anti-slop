@@ -28,11 +28,21 @@ func caseTables(file *ast.File) tables {
 
 func (found tables) addAdjacent(statements []ast.Stmt) {
 	for i, stmt := range statements {
-		if loop, ok := stmt.(*ast.RangeStmt); ok {
+		if loop, ok := unlabel(stmt).(*ast.RangeStmt); ok {
 			if table := adjacentCaseTable(statements[:i], loop.X); table != nil {
 				found[table] = struct{}{}
 			}
 		}
+	}
+}
+
+func unlabel(statement ast.Stmt) ast.Stmt {
+	for {
+		label, ok := statement.(*ast.LabeledStmt)
+		if !ok {
+			return statement
+		}
+		statement = label.Stmt
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 func TestCaseTableSyntax(t *testing.T) {
 	const table = "[]int{\n0,\n1,\n}"
 	const data = "[]int{\n0,\n// comment between cases\n\n1,\n}"
+	const labeledLoop = "each:\nfor _, v := range cases {\nif v == n {\ncontinue each\n}\n}\n"
 	longCases := "[]int{\n" + strings.Repeat("0,\n", 71) + "}"
 	for _, tc := range []struct {
 		name string
@@ -23,6 +24,10 @@ func TestCaseTableSyntax(t *testing.T) {
 			"cases := " + table + "\nfor _, v := range cases {\n_ = v\n}\n", 0},
 		{"adjacent declaration exceeds limit", strings.Repeat("_ = n\n", 66) +
 			"cases := " + table + "\nfor _, v := range cases {\n_ = v\n}\n", 71},
+		{"adjacent labeled range boundary", strings.Repeat("_ = n\n", 62) +
+			"cases := " + longCases + "\n" + labeledLoop, 0},
+		{"adjacent labeled range exceeds limit", strings.Repeat("_ = n\n", 63) +
+			"cases := " + longCases + "\n" + labeledLoop, 71},
 		{"comment and blank lines between cases count", strings.Repeat("_ = n\n", 65) +
 			"for _, v := range " + data + " {\n_ = v\n}\n", 71},
 		{"opening brace line counts even with a case", strings.Repeat("_ = n\n", 67) +
@@ -53,6 +58,8 @@ func TestCaseTableSyntax(t *testing.T) {
 			"\nfor {\nif n > 0 { break }\ncases = nil\n}\nfor range cases {}\n", 0},
 		{"overwrite before an early exit counts", "cases := " + longCases +
 			"\nfor {\ncases = nil\nif n > 0 { break }\n}\nfor range cases {}\n", 78},
+		{"conditional loop with an early exit counts", "cases := " + longCases +
+			"\nfor n > 0 {\nif n > 1 { break }\ncases = nil\nn--\n}\nfor range cases {}\n", 79},
 		{"loop initializer overwrite counts", "cases := " + longCases +
 			"\nfor cases = nil; ; {\nif n > 0 { break }\n}\nfor range cases {}\n", 77},
 		{"guard initializer overwrite counts", "cases := " + longCases +

@@ -87,6 +87,7 @@ func TestFunctionLengthFixtures(t *testing.T) {
 			"catch.go:3:1: funclen: function body is 71 lines; limit is 70",
 			"catch.go:77:1: funclen: function body is 72 lines; limit is 70",
 			"catch.go:154:16: funclen: function body is 71 lines; limit is 70",
+			"conditional_loop_test.go:3:1: funclen: function body is 82 lines; limit is 70",
 			"ordinary_test.go:5:1: funclen: function body is 95 lines; limit is 70",
 		}},
 		{"leave", nil},

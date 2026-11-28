@@ -69,10 +69,10 @@ files are skipped. The command prints `path:line:col: funclen: <reason>` and exi
 In `_test.go` files, the rule recognizes case literals written directly in a range
 expression, as in `for _, tc := range []testCase{…}`. It also recognizes
 `cases := []testCase{…}` immediately followed in the same statement list by
-`for _, tc := range cases`. A full slice such as `cases[:]` still ranges over
-the entire table. One short declaration such as `alias := cases` can sit between
-the literal and the range over `alias`. Each declaration and loop must appear
-in the same statement list.
+`for _, tc := range cases`, including when the range has a label. A full slice
+such as `cases[:]` still ranges over the entire table. One short declaration
+such as `alias := cases` can sit between the literal and the range over `alias`.
+Each declaration and loop must appear in the same statement list.
 
 A conditionless loop between the declaration and range can preserve the declared
 table when its first statement is an `if` whose body is a bare `break`. The loop
