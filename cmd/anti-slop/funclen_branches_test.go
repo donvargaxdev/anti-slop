@@ -33,6 +33,7 @@ func TestCaseTableSyntax(t *testing.T) {
 			"for range [][]int{\n{\n0,\n1,\n},\n} {\n_ = n\n}\n", 0},
 		{"alias counts", "cases := " + longCases + "\nalias := cases\nfor range alias {}\n", 75},
 		{"slice expression counts", "cases := " + longCases + "\nfor range cases[1:] {}\n", 74},
+		{"full slice expression counts", "cases := " + longCases + "\nfor range cases[:] {}\n", 74},
 		{"intervening setup counts", "cases := " + longCases + "\n_ = n\nfor range cases {}\n", 75},
 		{"declaration outside the loop block counts", "cases := " + longCases +
 			"\nif n > 0 {\nfor range cases {}\n}\n", 76},
@@ -44,6 +45,8 @@ func TestCaseTableSyntax(t *testing.T) {
 			"\nfor range other {}\n_ = cases\n", 76},
 		{"assignment through a loop with an early exit counts", "var cases []int\n" +
 			"for range n {\nif n > 1 { break }\ncases = " + longCases + "\n}\nfor range cases {}\n", 78},
+		{"declaration before an early exit counts", "cases := " + longCases +
+			"\nfor {\nif n > 0 { break }\ncases = nil\n}\nfor range cases {}\n", 78},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const header = "package example\nfunc test(n int) {\n"
@@ -54,4 +57,13 @@ func TestCaseTableSyntax(t *testing.T) {
 			assertFunctionLengthOutput(t, "cases_test.go", header+tc.body+"}\n", want)
 		})
 	}
+}
+
+func TestCaseTableAssignmentsToParametersAndResultsCount(t *testing.T) {
+	const header = "package example\nfunc helper(cases []int, flag bool) (result []int) {\n"
+	literal := "[]int{\n" + strings.Repeat("0,\n", 71) + "}\n"
+	source := header + "if flag {\ncases = " + literal + "}\nfor range cases {}\n" +
+		"if flag {\nresult = " + literal + "}\nfor range result {}\nreturn\n}\n"
+	const want = "cases_test.go:2:1: funclen: function body is 153 lines; limit is 70\n"
+	assertFunctionLengthOutput(t, "cases_test.go", source, want)
 }

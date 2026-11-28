@@ -63,56 +63,57 @@ func interiorLines(fset *token.FileSet, open, close token.Pos) int {
 
 func testCaseLines(fset *token.FileSet, body *ast.BlockStmt) int {
 	lines := make(map[int]struct{})
-	mark := func(table *ast.CompositeLit) {
-		open := fset.PositionFor(table.Lbrace, false).Line
-		closeLine := fset.PositionFor(table.Rbrace, false).Line
-		for _, element := range table.Elts {
-			first := fset.PositionFor(element.Pos(), false).Line
-			last := fset.PositionFor(element.End(), false).Line
-			for line := max(open+1, first); line <= min(closeLine-1, last); line++ {
-				lines[line] = struct{}{}
-			}
-		}
-	}
 	for node := range ast.Preorder(body) {
 		switch node := node.(type) {
 		case *ast.RangeStmt:
 			if table, ok := ast.Unparen(node.X).(*ast.CompositeLit); ok {
-				mark(table)
+				markCaseData(fset, lines, table)
 			}
 		case *ast.BlockStmt:
-			markAdjacentTables(node.List, mark)
+			markAdjacentTables(fset, lines, node.List)
 		case *ast.CaseClause:
-			markAdjacentTables(node.Body, mark)
+			markAdjacentTables(fset, lines, node.Body)
 		case *ast.CommClause:
-			markAdjacentTables(node.Body, mark)
+			markAdjacentTables(fset, lines, node.Body)
 		}
 	}
 	return len(lines)
 }
 
-func markAdjacentTables(statements []ast.Stmt, mark func(*ast.CompositeLit)) {
-	var previous ast.Stmt
-	for _, stmt := range statements {
-		if loop, ok := stmt.(*ast.RangeStmt); ok {
-			if table := adjacentCaseTable(previous, loop.X); table != nil {
-				mark(table)
-			}
+func markCaseData(fset *token.FileSet, lines map[int]struct{}, table *ast.CompositeLit) {
+	firstInterior := fset.PositionFor(table.Lbrace, false).Line + 1
+	lastInterior := fset.PositionFor(table.Rbrace, false).Line - 1
+	for _, element := range table.Elts {
+		first := max(firstInterior, fset.PositionFor(element.Pos(), false).Line)
+		last := min(lastInterior, fset.PositionFor(element.End()-1, false).Line)
+		for line := first; line <= last; line++ {
+			lines[line] = struct{}{}
 		}
-		previous = stmt
+	}
+}
+
+func markAdjacentTables(fset *token.FileSet, lines map[int]struct{}, statements []ast.Stmt) {
+	for index := 1; index < len(statements); index++ {
+		loop, ok := statements[index].(*ast.RangeStmt)
+		if !ok {
+			continue
+		}
+		if table := adjacentCaseTable(statements[index-1], loop.X); table != nil {
+			markCaseData(fset, lines, table)
+		}
 	}
 }
 
 func adjacentCaseTable(previous ast.Stmt, expr ast.Expr) *ast.CompositeLit {
-	identifier, ok := ast.Unparen(expr).(*ast.Ident)
-	if !ok {
-		return nil
-	}
 	declaration, ok := previous.(*ast.AssignStmt)
 	if !ok || declaration.Tok != token.DEFINE {
 		return nil
 	}
 	if len(declaration.Lhs) != 1 || len(declaration.Rhs) != 1 {
+		return nil
+	}
+	identifier, ok := ast.Unparen(expr).(*ast.Ident)
+	if !ok {
 		return nil
 	}
 	local, ok := declaration.Lhs[0].(*ast.Ident)

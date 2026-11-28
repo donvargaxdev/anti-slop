@@ -73,8 +73,10 @@ such as `cases := []testCase{…}` when the next statement in that statement lis
 The literal's brace lines, blank lines and comments between elements, setup, loop and assertions
 all count. A body with 70 counted lines passes. A body with 71 is reported.
 
-An alias, a slice expression such as `range cases[1:]`, an intervening statement, or an
-assignment inside a loop with an early exit leaves the literal's lines in the count.
+The rule counts all literal lines when a range uses an alias or a slice expression such as
+`cases[:]` or `cases[1:]`. It also counts them when a statement intervenes between the
+declaration and the range, including a loop that can exit early. Assignments to a variable,
+parameter, or named result count in full.
 
 Around them:
 
