@@ -40,7 +40,8 @@ The `comments` command is the second slice, `internal/slices/comments`, and runs
 `internal/rules/comments`:
 
 - `internal/rules/<name>` is a rule: a `go/analysis` pass over syntax, importing the standard
-  library and the analysis framework and nothing of ours (`rule`, `rule-tests`). Its fixtures are
+  library and the analysis framework and nothing of ours (`rule`, `rule-tests`). The function
+  length rule also uses the pinned `x/tools/go/cfg` package to follow local assignments. Rule fixtures are
   packages under `testdata/src`, one that must be caught and one that must be left.
   The graph check lets only an adapter import a rule, and `cmd` assemble one.
 - `internal/engine/checking/port` declares the shared `Checker`, `Finding` and the sealed failures
@@ -66,19 +67,26 @@ operators. The CLI assembly binds it to the checker port using the same syntax a
 lines between its body braces. The brace lines of the body are outside the count. Generated
 files are skipped. The command prints `path:line:col: funclen: <reason>` and exits 0 on findings.
 
-In `_test.go` files, the rule recognizes a case literal written directly in the range expression,
-as in `for _, tc := range []testCase{…}`. It also recognizes a single-variable short declaration
-such as `cases := []testCase{…}` when the next statement in that statement list ranges over
-`cases`. This includes labeled ranges and declaration-range pairs inside callbacks, nested
-blocks, switch cases and select clauses. Only the lines spanned by the elements inside the
-literal's brace lines are exempt. The literal's brace lines, blank lines and comments between
-elements, setup, labels, loop and assertions all count. A body with 70 counted lines passes.
-A body with 71 is reported.
+In `_test.go` files, the rule recognizes case literals written directly in a range
+expression, as in `for _, tc := range []testCase{…}`. It also recognizes local
+table literals that can reach a range through declarations, assignments, aliases
+or a full slice expression such as `cases[:]`. This includes literals supplied
+by alternative branches and earlier loop iterations. A write that replaces the
+table clears its previous value. Each function literal can read table bindings
+visible where it is created, and table data in a nested callback counts as exempt
+in its enclosing body as well.
 
-The rule counts all literal lines when a range uses an alias or a slice expression such as
-`cases[:]` or `cases[1:]`. It also counts them when a statement intervenes between the
-declaration and the range, including a loop that can exit early. Assignments to a variable,
-parameter, or named result count in full.
+Only the physical lines spanned by case elements inside the literal's brace
+lines are exempt. The literal's brace lines, blank lines and comments between
+elements, setup, labels, loop and assertions all count. Partial slices such as
+`cases[1:]`, values returned by calls and assignments that cannot reach a range
+leave their literal lines in the count.
+
+For example, with `cases := []testCase{…}` on multiple lines,
+`alias := cases`, and a three-line loop over `alias[:]` with one assertion,
+the declaration's two brace lines, the alias assignment and the three loop lines
+give six counted lines. Add 64 setup lines and the body passes at 70. Add a
+65th setup line and the rule reports 71.
 
 Around them:
 

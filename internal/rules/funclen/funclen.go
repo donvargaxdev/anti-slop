@@ -31,21 +31,18 @@ func reportFiles(fset *token.FileSet, files []*ast.File, report func(analysis.Di
 		if ast.IsGenerated(file) {
 			continue
 		}
-		testFile := strings.HasSuffix(fset.File(file.Pos()).Name(), "_test.go")
+		var tablesUsed tables
+		if strings.HasSuffix(fset.File(file.Pos()).Name(), "_test.go") {
+			tablesUsed = caseTables(file)
+		}
 		for node := range ast.Preorder(file) {
-			var body *ast.BlockStmt
-			switch function := node.(type) {
-			case *ast.FuncDecl:
-				body = function.Body
-			case *ast.FuncLit:
-				body = function.Body
-			}
+			body := functionBody(node)
 			if body == nil {
 				continue
 			}
 			lines := interiorLines(fset, body.Lbrace, body.Rbrace)
-			if testFile && lines > limit {
-				lines -= testCaseLines(fset, body)
+			if lines > limit {
+				lines -= testCaseLines(fset, body, tablesUsed)
 			}
 			if lines > limit {
 				report(analysis.Diagnostic{
@@ -61,20 +58,21 @@ func interiorLines(fset *token.FileSet, open, close token.Pos) int {
 	return max(0, fset.PositionFor(close, false).Line-fset.PositionFor(open, false).Line-1)
 }
 
-func testCaseLines(fset *token.FileSet, body *ast.BlockStmt) int {
+func functionBody(node ast.Node) *ast.BlockStmt {
+	switch function := node.(type) {
+	case *ast.FuncDecl:
+		return function.Body
+	case *ast.FuncLit:
+		return function.Body
+	}
+	return nil
+}
+
+func testCaseLines(fset *token.FileSet, body *ast.BlockStmt, tablesUsed tables) int {
 	lines := make(map[int]struct{})
-	for node := range ast.Preorder(body) {
-		switch node := node.(type) {
-		case *ast.RangeStmt:
-			if table, ok := ast.Unparen(node.X).(*ast.CompositeLit); ok {
-				markCaseData(fset, lines, table)
-			}
-		case *ast.BlockStmt:
-			markAdjacentTables(fset, lines, node.List)
-		case *ast.CaseClause:
-			markAdjacentTables(fset, lines, node.Body)
-		case *ast.CommClause:
-			markAdjacentTables(fset, lines, node.Body)
+	for table := range tablesUsed {
+		if body.Lbrace < table.Pos() && table.End() <= body.Rbrace {
+			markCaseData(fset, lines, table)
 		}
 	}
 	return len(lines)
@@ -90,44 +88,4 @@ func markCaseData(fset *token.FileSet, lines map[int]struct{}, table *ast.Compos
 			lines[line] = struct{}{}
 		}
 	}
-}
-
-func markAdjacentTables(fset *token.FileSet, lines map[int]struct{}, statements []ast.Stmt) {
-	for index := 1; index < len(statements); index++ {
-		statement := statements[index]
-		for {
-			labeled, ok := statement.(*ast.LabeledStmt)
-			if !ok {
-				break
-			}
-			statement = labeled.Stmt
-		}
-		loop, ok := statement.(*ast.RangeStmt)
-		if !ok {
-			continue
-		}
-		if table := adjacentCaseTable(statements[index-1], loop.X); table != nil {
-			markCaseData(fset, lines, table)
-		}
-	}
-}
-
-func adjacentCaseTable(previous ast.Stmt, expr ast.Expr) *ast.CompositeLit {
-	declaration, ok := previous.(*ast.AssignStmt)
-	if !ok || declaration.Tok != token.DEFINE {
-		return nil
-	}
-	if len(declaration.Lhs) != 1 || len(declaration.Rhs) != 1 {
-		return nil
-	}
-	identifier, ok := ast.Unparen(expr).(*ast.Ident)
-	if !ok {
-		return nil
-	}
-	local, ok := declaration.Lhs[0].(*ast.Ident)
-	if !ok || local.Name != identifier.Name {
-		return nil
-	}
-	table, _ := ast.Unparen(declaration.Rhs[0]).(*ast.CompositeLit)
-	return table
 }

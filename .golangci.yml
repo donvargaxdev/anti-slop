@@ -208,6 +208,7 @@ linters:
           list-mode: strict
           files:
             - "**/internal/rules/**"
+            - "!**/internal/rules/funclen/cases.go"
             - "!$test"
           allow:
             - "$gostd"
@@ -225,6 +226,15 @@ linters:
               desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
             - pkg: "plugin$"
               desc: "a rule reads the syntax it is given; I/O belongs in an adapter behind a port"
+        funclen-control-flow:
+          list-mode: strict
+          files:
+            - "**/internal/rules/funclen/cases.go"
+          allow:
+            - "go/ast$"
+            - "go/token$"
+            - "maps$"
+            - "golang.org/x/tools/go/cfg$"
         rule-tests:
           list-mode: strict
           files:
