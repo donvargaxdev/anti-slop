@@ -31,9 +31,13 @@ func TestCaseTableSyntax(t *testing.T) {
 			"for range []int{\n0,\n1} {\n_ = n\n}\n", 71},
 		{"all lines of a multiline case are exempt", strings.Repeat("_ = n\n", 66) +
 			"for range [][]int{\n{\n0,\n1,\n},\n} {\n_ = n\n}\n", 0},
-		{"local alias", "cases := " + longCases + "\nalias := cases\nfor range alias {}\n", 75},
+		{"local alias", "cases := " + longCases + "\nalias := cases\nfor range alias {}\n", 0},
+		{"alias of another variable counts", "other := []int{n}\ncases := " + longCases +
+			"\nalias := other\nfor range alias {}\n_ = cases\n", 77},
 		{"slice expression counts", "cases := " + longCases + "\nfor range cases[1:] {}\n", 74},
-		{"full slice expression", "cases := " + longCases + "\nfor range cases[:] {}\n", 74},
+		{"full slice expression", "cases := " + longCases + "\nfor range cases[:] {}\n", 0},
+		{"bounded slice expression counts", "cases := " + longCases + "\nfor range cases[:1] {}\n", 74},
+		{"three-index slice expression counts", "cases := " + longCases + "\nfor range cases[:1:1] {}\n", 74},
 		{"intervening setup", "cases := " + longCases + "\n_ = n\nfor range cases {}\n", 75},
 		{"declaration outside the loop block", "cases := " + longCases +
 			"\nif n > 0 {\nfor range cases {}\n}\n", 76},
@@ -46,7 +50,17 @@ func TestCaseTableSyntax(t *testing.T) {
 		{"assignment in a loop with an early exit", "var cases []int\n" +
 			"for range n {\nif n > 1 { break }\ncases = " + longCases + "\n}\nfor range cases {}\n", 78},
 		{"declaration preserved by an early exit", "cases := " + longCases +
-			"\nfor {\nif n > 0 { break }\ncases = nil\n}\nfor range cases {}\n", 78},
+			"\nfor {\nif n > 0 { break }\ncases = nil\n}\nfor range cases {}\n", 0},
+		{"overwrite before an early exit counts", "cases := " + longCases +
+			"\nfor {\ncases = nil\nif n > 0 { break }\n}\nfor range cases {}\n", 78},
+		{"loop initializer overwrite counts", "cases := " + longCases +
+			"\nfor cases = nil; ; {\nif n > 0 { break }\n}\nfor range cases {}\n", 77},
+		{"guard initializer overwrite counts", "cases := " + longCases +
+			"\nfor {\nif cases = nil; n > 0 { break }\n}\nfor range cases {}\n", 77},
+		{"guard overwrite counts", "cases := " + longCases +
+			"\nfor {\nif n > 0 { cases = nil; break }\n}\nfor range cases {}\n", 77},
+		{"break to another loop counts", "outer: for {\ncases := " + longCases +
+			"\nfor {\nif n > 0 { break outer }\n}\nfor range cases {}\n}\n", 79},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const header = "package example\nfunc test(n int) {\n"

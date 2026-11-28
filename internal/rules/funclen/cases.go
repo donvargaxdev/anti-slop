@@ -27,23 +27,53 @@ func caseTables(file *ast.File) tables {
 }
 
 func (found tables) addAdjacent(statements []ast.Stmt) {
-	var previous ast.Stmt
-	for _, stmt := range statements {
+	for i, stmt := range statements {
 		if loop, ok := stmt.(*ast.RangeStmt); ok {
-			if table := adjacentCaseTable(previous, loop.X); table != nil {
+			if table := adjacentCaseTable(statements[:i], loop.X); table != nil {
 				found[table] = struct{}{}
 			}
 		}
-		previous = stmt
 	}
 }
 
-func adjacentCaseTable(previous ast.Stmt, expression ast.Expr) *ast.CompositeLit {
-	name, ok := ast.Unparen(expression).(*ast.Ident)
-	if !ok {
+func adjacentCaseTable(before []ast.Stmt, expression ast.Expr) *ast.CompositeLit {
+	name := rangedName(expression)
+	count := len(before)
+	if name == "" || count == 0 {
 		return nil
 	}
-	declaration, ok := previous.(*ast.AssignStmt)
+	previous := before[count-1]
+	if value := declaredValue(previous, name); value != nil {
+		if table := caseLiteral(value); table != nil {
+			return table
+		}
+		aliasOf, ok := ast.Unparen(value).(*ast.Ident)
+		if ok && count >= 2 {
+			return caseLiteral(declaredValue(before[count-2], aliasOf.Name))
+		}
+	}
+	if count >= 2 && startsWithBreak(previous) {
+		return caseLiteral(declaredValue(before[count-2], name))
+	}
+	return nil
+}
+
+func rangedName(expression ast.Expr) string {
+	expression = ast.Unparen(expression)
+	if slice, ok := expression.(*ast.SliceExpr); ok {
+		if slice.Low != nil || slice.High != nil {
+			return ""
+		}
+		expression = ast.Unparen(slice.X)
+	}
+	if name, ok := expression.(*ast.Ident); ok {
+		return name.Name
+	}
+	return ""
+}
+
+func declaredValue(statement ast.Stmt, name string) ast.Expr {
+	declaration, ok := statement.(*ast.AssignStmt)
 	if !ok || declaration.Tok != token.DEFINE {
 		return nil
 	}
@@ -51,10 +81,23 @@ func adjacentCaseTable(previous ast.Stmt, expression ast.Expr) *ast.CompositeLit
 		return nil
 	}
 	local, ok := declaration.Lhs[0].(*ast.Ident)
-	if !ok || local.Name != name.Name {
+	if !ok || local.Name != name {
 		return nil
 	}
-	return caseLiteral(declaration.Rhs[0])
+	return declaration.Rhs[0]
+}
+
+func startsWithBreak(statement ast.Stmt) bool {
+	loop, ok := statement.(*ast.ForStmt)
+	if !ok || loop.Init != nil || loop.Cond != nil || len(loop.Body.List) == 0 {
+		return false
+	}
+	guard, ok := loop.Body.List[0].(*ast.IfStmt)
+	if !ok || guard.Init != nil || len(guard.Body.List) != 1 {
+		return false
+	}
+	exit, ok := guard.Body.List[0].(*ast.BranchStmt)
+	return ok && exit.Tok == token.BREAK && exit.Label == nil
 }
 
 func caseLiteral(expression ast.Expr) *ast.CompositeLit {

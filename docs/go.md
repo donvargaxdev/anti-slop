@@ -69,9 +69,16 @@ files are skipped. The command prints `path:line:col: funclen: <reason>` and exi
 In `_test.go` files, the rule recognizes case literals written directly in a range
 expression, as in `for _, tc := range []testCase{…}`. It also recognizes
 `cases := []testCase{…}` immediately followed in the same statement list by
-`for _, tc := range cases`. Literal lines count when the range uses an alias
-or a slice expression such as `cases[1:]` or `cases[:]`, or when identifying the
-literal would require tracking assignments through a loop with an early exit.
+`for _, tc := range cases`. A full slice such as `cases[:]` still ranges over
+the entire table. One short declaration such as `alias := cases` can sit between
+the literal and the range over `alias`. Each declaration and loop must appear
+in the same statement list.
+
+A conditionless loop between the declaration and range can preserve the declared
+table when its first statement is an `if` whose body is a bare `break`. The loop
+and the `if` must have no initializer, so that the break can precede a later
+overwrite such as `cases = nil`. Literal lines count for bounded slices such as
+`cases[1:]`, longer alias chains, and table literals assigned within a loop.
 
 Only the physical lines spanned by case elements inside the literal's brace
 lines are exempt. The literal's brace lines, blank lines and comments between
