@@ -69,9 +69,11 @@ files are skipped. The command prints `path:line:col: funclen: <reason>` and exi
 In `_test.go` files, the rule recognizes a case literal written directly in the range expression,
 as in `for _, tc := range []testCase{…}`. It also recognizes a single-variable short declaration
 such as `cases := []testCase{…}` when the next statement in that statement list ranges over
-`cases`. Only the lines spanned by the elements inside the literal's brace lines are exempt.
-The literal's brace lines, blank lines and comments between elements, setup, loop and assertions
-all count. A body with 70 counted lines passes. A body with 71 is reported.
+`cases`. This includes labeled ranges and declaration-range pairs inside callbacks, nested
+blocks, switch cases and select clauses. Only the lines spanned by the elements inside the
+literal's brace lines are exempt. The literal's brace lines, blank lines and comments between
+elements, setup, labels, loop and assertions all count. A body with 70 counted lines passes.
+A body with 71 is reported.
 
 The rule counts all literal lines when a range uses an alias or a slice expression such as
 `cases[:]` or `cases[1:]`. It also counts them when a statement intervenes between the

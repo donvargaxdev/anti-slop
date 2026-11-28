@@ -67,3 +67,38 @@ func TestCaseTableAssignmentsToParametersAndResultsCount(t *testing.T) {
 	const want = "cases_test.go:2:1: funclen: function body is 153 lines; limit is 70\n"
 	assertFunctionLengthOutput(t, "cases_test.go", source, want)
 }
+
+func TestLabeledCaseRangeCountsLabelAndAssertions(t *testing.T) {
+	const header = "package example\nfunc test(n int) {\n"
+	literal := "[]int{\n" + strings.Repeat("0,\n", 71) + "}\n"
+	const loop = "each:\nfor _, value := range cases {\nif value == n {\ncontinue each\n}\n}\n"
+	t.Run("70 counted lines", func(t *testing.T) {
+		source := header + strings.Repeat("_ = n\n", 62) + "cases := " + literal + loop + "}\n"
+		assertFunctionLengthOutput(t, "cases_test.go", source, "")
+	})
+	t.Run("71 counted lines", func(t *testing.T) {
+		source := header + strings.Repeat("_ = n\n", 63) + "cases := " + literal + loop + "}\n"
+		const want = "cases_test.go:2:1: funclen: function body is 71 lines; limit is 70\n"
+		assertFunctionLengthOutput(t, "cases_test.go", source, want)
+	})
+}
+
+func TestNestedCaseTableSyntax(t *testing.T) {
+	const header = "package example\nfunc test(n int) {\n"
+	literal := "[]int{\n" + strings.Repeat("0,\n", 71) + "}\n"
+	for _, tc := range []struct {
+		name   string
+		prefix string
+		suffix string
+	}{
+		{"callback", "_ = func() {\n", "}\n"},
+		{"switch clause", "switch n {\ncase 0:\n", "}\n"},
+		{"select clause", "select {\ndefault:\n", "}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const loop = "for _, value := range cases {\n_ = value\n}\n"
+			source := header + tc.prefix + "cases := " + literal + loop + tc.suffix + "}\n"
+			assertFunctionLengthOutput(t, "cases_test.go", source, "")
+		})
+	}
+}

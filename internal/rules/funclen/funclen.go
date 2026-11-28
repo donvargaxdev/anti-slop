@@ -94,7 +94,15 @@ func markCaseData(fset *token.FileSet, lines map[int]struct{}, table *ast.Compos
 
 func markAdjacentTables(fset *token.FileSet, lines map[int]struct{}, statements []ast.Stmt) {
 	for index := 1; index < len(statements); index++ {
-		loop, ok := statements[index].(*ast.RangeStmt)
+		statement := statements[index]
+		for {
+			labeled, ok := statement.(*ast.LabeledStmt)
+			if !ok {
+				break
+			}
+			statement = labeled.Stmt
+		}
+		loop, ok := statement.(*ast.RangeStmt)
 		if !ok {
 			continue
 		}
