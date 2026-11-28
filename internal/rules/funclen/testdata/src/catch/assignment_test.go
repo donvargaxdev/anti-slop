@@ -1,8 +1,8 @@
-package leave
+package catch
 
 import "testing"
 
-func TestAssignedTable(t *testing.T) {
+func TestAssignedTable(t *testing.T) { // want "function body is 82 lines; limit is 70"
 	var cases []int
 	if t.Name() == "TestAssignedTable" {
 		cases = []int{

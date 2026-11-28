@@ -83,6 +83,7 @@ func TestFunctionLengthFixtures(t *testing.T) {
 		want []string
 	}{
 		{"catch", []string{
+			"assignment_test.go:5:1: funclen: function body is 82 lines; limit is 70",
 			"catch.go:3:1: funclen: function body is 71 lines; limit is 70",
 			"catch.go:77:1: funclen: function body is 72 lines; limit is 70",
 			"catch.go:154:16: funclen: function body is 71 lines; limit is 70",
