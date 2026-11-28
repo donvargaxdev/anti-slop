@@ -153,3 +153,43 @@ func TestNestedCaseTableSyntax(t *testing.T) {
 		})
 	}
 }
+
+func TestFunctionLengthCountsIndirectSubtestTables(t *testing.T) {
+	const header = `package example
+
+type runner struct{}
+
+func (runner) Run(_ string, callback func([]int), args ...int) { callback(args) }
+func (runner) Visit(name string, callback func([]int)) { runner{}.Run(name, callback) }
+func runCases(name string, callback func([]int)) { runner{}.Run(name, callback) }
+func visit([]int) {}
+
+func test(r runner, ready <-chan struct{}) {
+`
+	const callback = "func(values []int) { for range cases {} }"
+	table := "cases := []int{\n" + strings.Repeat("0,\n", 71) + "}\n"
+	const want = "cases_test.go:10:1: funclen: function body is 75 lines; limit is 70\n"
+	for _, tc := range []struct {
+		name string
+		stmt string
+	}{
+		{"channel receive", "<-ready"},
+		{"extra argument", `r.Run("cases", ` + callback + ", 0)"},
+		{"plain call", `runCases("cases", ` + callback + ")"},
+		{"different method", `r.Visit("cases", ` + callback + ")"},
+		{"named callback", `r.Run("cases", visit)`},
+		{"shadowing parameter", `r.Run("cases", func(cases []int) { for range cases {} })`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := header + table + tc.stmt + "\n_ = cases\n}\n"
+			assertFunctionLengthOutput(t, "cases_test.go", source, want)
+		})
+	}
+}
+
+func TestFunctionLengthCountsTableAssignedToIndexedTarget(t *testing.T) {
+	source := "package example\nfunc test(n int) {\ncases := [][]int{{n}}\nif n > 0 {\n" +
+		"cases[0] = []int{\n" + strings.Repeat("0,\n", 71) + "}\n}\nfor range cases[0] {}\n}\n"
+	const want = "cases_test.go:2:1: funclen: function body is 77 lines; limit is 70\n"
+	assertFunctionLengthOutput(t, "cases_test.go", source, want)
+}
