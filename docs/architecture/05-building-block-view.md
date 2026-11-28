@@ -14,7 +14,7 @@ through their ports. `docs/go.md` lists the packages and the import rules that h
 | Slice | `internal/slices/comments/command` | The `comments` command line, its `Query` and `Handler`, `Classify` and `Patterns` (the checked arguments) | `internal/cli`, the checker port | `command`, `architecture-check` |
 | Checker port | `internal/engine/checking/port` | `Checker`, `Finding` and the sealed failures `Failed` and `Cancelled` | the standard library | `port`, `store-ports-io` |
 | Checker fake and suite | `internal/engine/checking/port/porttest` | The in-memory `Checker` and `CheckerContract` | the standard library, the checker port | `porttest` |
-| Slice adapter | `internal/slices/comments/loader` | Loads packages with go list and runs the rule over their syntax | the checker port, a rule | `adapter` |
+| Slice adapter | `internal/slices/comments/loader` | Loads original source files with go list and runs a syntax rule | the checker port, a rule | `adapter` |
 | Domain | `internal/engine/counting/domain` | Counting of lines and words and its result | the standard library packages its rule lists, other engines | `domain` |
 | Port | `internal/engine/counting/port` | `Files` and its sealed failures, `Missing`, `Unreadable` and `Cancelled` | the same short list; no `os` or `net` | `port`, `store-ports-io` |
 | Fake and suite | `internal/engine/counting/port/porttest` | The in-memory `Files` and `FilesContract` | the standard library, engines | `porttest` |

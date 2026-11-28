@@ -36,6 +36,7 @@ import (
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/disk"
 	"github.com/donvargaxdev/anti-slop/internal/engine/counting/port"
 	conditionsrule "github.com/donvargaxdev/anti-slop/internal/rules/conditions"
+	funclenrule "github.com/donvargaxdev/anti-slop/internal/rules/funclen"
 	recursionrule "github.com/donvargaxdev/anti-slop/internal/rules/recursion"
 	testsrule "github.com/donvargaxdev/anti-slop/internal/rules/tests"
 	comments "github.com/donvargaxdev/anti-slop/internal/slices/comments/command"
@@ -43,6 +44,7 @@ import (
 	conditions "github.com/donvargaxdev/anti-slop/internal/slices/conditions/command"
 	count "github.com/donvargaxdev/anti-slop/internal/slices/count/command"
 	"github.com/donvargaxdev/anti-slop/internal/slices/count/stdin"
+	funclen "github.com/donvargaxdev/anti-slop/internal/slices/funclen/command"
 	recursion "github.com/donvargaxdev/anti-slop/internal/slices/recursion/command"
 	tests "github.com/donvargaxdev/anti-slop/internal/slices/tests/command"
 	"github.com/donvargaxdev/anti-slop/internal/version"
@@ -64,6 +66,7 @@ type commandLine struct {
 	Conditions conditions.CLI `cmd:"" help:"Report long compound if and for conditions."`
 	Tests      tests.CLI      `cmd:"" help:"Report sleeps and raw environment changes in Go test files."`
 	Recursion  recursion.CLI  `cmd:"" help:"Report direct and short Go recursion cycles."`
+	Funclen    funclen.CLI    `cmd:"" help:"Report Go function bodies longer than 70 lines."`
 	Version    cli.Version    `cmd:"" help:"Print the version and the commit it was built from."`
 	Completion cli.Completion `cmd:"" help:"Print a shell completion script."`
 	Complete   struct{}       `cmd:"" name:"__complete" hidden:""`
@@ -95,6 +98,7 @@ type adapters struct {
 	Tests      checking.Checker
 	Recursion  checking.Checker
 	Conditions checking.Checker
+	Funclen    checking.Checker
 }
 
 // diskAdapters is every port bound to the real adapter.
@@ -106,6 +110,7 @@ func diskAdapters() adapters {
 		Tests:      typed.WithAnalyzer(testsrule.Analyzer),
 		Recursion:  typed.WithAnalyzer(recursionrule.Analyzer),
 		Conditions: commentsloader.Checker{Report: commentsloader.ReportSources(conditionsrule.Analyzer)},
+		Funclen:    commentsloader.Checker{Report: commentsloader.ReportSources(funclenrule.Analyzer)},
 	}
 }
 
@@ -175,6 +180,9 @@ func run(ctx context.Context, args []string, in io.Reader, stdout, stderr io.Wri
 	case "recursion":
 		ui.Classifiers = []cli.Classifier{c.Recursion.Classify}
 		return c.Recursion.Run(ctx, ui, recursion.Handler{Checker: a.Recursion})
+	case "funclen":
+		ui.Classifiers = []cli.Classifier{c.Funclen.Classify}
+		return c.Funclen.Run(ctx, ui, funclen.Handler{Checker: a.Funclen})
 	case "version":
 		// What --version prints, as kong prints it, or with --json the
 		// version and commit that text is made of.

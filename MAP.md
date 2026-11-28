@@ -76,3 +76,10 @@ test command. Add an entry for each slice or domain; say where to look, not what
 - Scenarios are in `features/conditions.feature`.
 - Run the fixture checks with `go test ./cmd/anti-slop -run '^TestCompoundConditions$'`
   and the package-loading smoke test with `go test ./internal/rules/conditions/...`.
+
+## Function length rule
+
+- Analyzer and fixtures: `internal/rules/funclen`.
+- Command: `internal/slices/funclen/command`, using the source adapter shared with `comments`.
+- Scenarios: `features/funclen.feature`.
+- Test: `go test ./cmd/anti-slop -run TestFunctionLength` checks the fixtures through the CLI.
